@@ -1,1 +1,12 @@
 .DS_Store
+
+# Competition data (not for public distribution)
+*.csv
+*.pdf
+*.xlsx
+
+# Derived data objects
+*.rds
+*.RData
+.Rhistory
+.Rproj.user/

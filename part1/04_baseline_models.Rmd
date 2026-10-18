@@ -1,0 +1,155 @@
+---
+title: "04 Baseline models: Poisson then negative binomial"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = normalizePath(".."))   # run from project root
+library(dplyr); library(tidyr); library(ggplot2); library(lubridate); library(MASS)
+select <- dplyr::select   # MASS masks select()
+```
+
+## Goal
+
+Fit a simple GLM for each severity and read the coefficients.
+
+## Concept note
+
+-   A count GLM models `log(expected count) = intercept + b1*x1 + ...`. So `exp(b)` is a **rate ratio**: "x up by 1 multiplies the expected count by exp(b)".
+-   `offset(log(visitors))` means we model incidents **per visitor**, with coefficient fixed at 1. The EDA in step 02 tells you if that is reasonable (alternative: put `log(visitors)` in as a normal term and let the data choose the exponent).
+-   **Poisson** assumes variance = mean. **Negative binomial** adds a dispersion parameter `theta` for overdispersed data. `MASS::glm.nb()` fits it.
+
+```{r load}
+panel_f <- readRDS("part1/panel_f.rds")
+train <- panel_f %>% filter(month_date < as.Date("2025-09-01"))   # hold out Sep 2025 - Aug 2026
+```
+
+## 1. Poisson baseline for n_all
+
+Write the predictor list once and reuse it for every model, so the models differ only in the response.
+
+```{r pois}
+rhs <- c("mon", "period_2021",                                           # time
+         "swell_max_m", "wind_days", "rain_mm", "air_temp_hi", "marine_health",   # conditions
+         "log_lg", "log_drone", "campaign_idx", "first_aid_cap", "pa_system", "flags", "equip_rating",  # safety
+         "rips_per_km", "rocky", "fishing", "rockpool", "shore_len_m", "surfer_prop", "tourist_ratio")  # beach / visitors
+
+make_formula <- function(y) as.formula(paste(y, "~", paste(rhs, collapse = " + "), "+ offset(log(visitors))"))
+
+m_pois <- glm(make_formula("n_all"), family = poisson, data = train)
+summary(m_pois)
+```
+
+`marine_health` is an ordered factor, so R reports `.L` (linear trend L to H) and `.Q` (curvature) terms.
+
+## 2. Overdispersion check
+
+A quick rule: residual deviance / residual df much greater than 1 means overdispersion.
+
+```{r disp}
+deviance(m_pois) / df.residual(m_pois)
+# Pearson version (the more standard check)
+sum(residuals(m_pois, type = "pearson")^2) / df.residual(m_pois)
+```
+
+If these are well above 1, the Poisson standard errors are too small (it is overconfident), which is why we move to negative binomial.
+
+## 3. Negative binomial
+
+```{r nb}
+m_nb <- glm.nb(make_formula("n_all"), data = train)
+summary(m_nb)
+m_nb$theta          # dispersion: smaller theta = more overdispersion (Poisson is theta -> infinity)
+AIC(m_pois, m_nb)   # lower is better; a big drop confirms negative binomial
+```
+
+Note that `glm.nb()` needs no `family` argument, and the formula (with the offset) is the same.
+
+## 4. Interpret
+
+### How to read the numbers
+
+The model is `log(expected incidents) = ... + b * x`, so `exp(b)` is a **rate ratio (RR)**: the factor the expected count is multiplied by when `x` rises by one unit, holding everything else fixed. RR = 1 means no effect, below 1 is protective, above 1 raises incidents. Because of `offset(log(visitors))` these are effects on incidents **per visitor**. A 95% interval that includes 1 means we cannot distinguish the effect from zero.
+
+```{r rr}
+rr_table <- function(m) round(exp(cbind(RR = coef(m), confint.default(m))), 3)
+rr_table(m_nb)
+```
+
+### Step 1: does the model structure make sense?
+
+-   Poisson is overconfident (deviance/df about 1.9, Pearson about 2.2), so its p-values are too optimistic.
+-   Negative binomial lowers AIC from about 32,400 to about 28,700 (`theta` about 3.2). We use it from here on.
+
+### Step 2: what drives the total number of incidents?
+
+Read these from the `m_nb` table above.
+
+| Driver | RR | In plain words |
+|----|----|----|
+| `rips_per_km` | 1.18 | Each extra rip per km adds about 18% to incidents per visitor. A static hazard of the beach itself. |
+| `swell_max_m` | 1.08 | Each extra metre of maximum swell adds about 8%. |
+| `tourist_ratio` | 3.24 | Beaches and months with more tourists have more incidents per visitor. The unit is a share from 0 to 1 and its standard deviation is only 0.17, so a typical one-SD rise is about 1.2x, not 3x. |
+| `campaign_idx` | 0.42 | Largest protective effect. The index only reaches 0.7 and is on in about a quarter of beach-months (summer campaigns), so a full campaign goes with a very large fall. |
+| `log_lg` (lifeguard hours) | 0.95 | Each extra log-unit of hours cuts incidents by about 5%. Going from 100 to 1,000 hours (2.3 log units) is roughly 12% fewer. |
+| `flags`, `surfer_prop` | 0.91, 0.79 | Mildly protective, with intervals just below 1. |
+| `log_drone`, `pa_system`, `first_aid_cap`, `period_2021` | about 1 | No clear effect on total incidents (intervals include 1 or sit at 1.00). |
+
+Month terms are all positive against January and peak in Sep-Oct. Visitors are already accounted for, so this says each visit carries more risk in spring and winter than in summer, matching the EDA.
+
+### Step 3: do effects change with severity? (section 5 output)
+
+Yes, and this is the main finding for Task 2.
+
+| Driver                           | All  | CloseCall | Severe |
+|----------------------------------|------|-----------|--------|
+| Lifeguard hours (`log_lg`)       | 0.95 | 0.93      | 0.86   |
+| Drone hours (`log_drone`)        | 1.00 | 0.82      | 0.76   |
+| Safety campaign (`campaign_idx`) | 0.42 | 0.19      | 0.23   |
+| Max swell (`swell_max_m`)        | 1.08 | 1.51      | 2.09   |
+
+-   Protective measures matter more the more serious the incident. Drones do almost nothing to the total but clearly cut CloseCall and Severe incidents.
+-   Rough seas matter much more for serious incidents than for minor ones.
+-   Severe has only about 220 events, so its intervals are wide. `tourist_ratio` is far too unstable to quote a size for (its RR is about 50 with an interval from about 13 to 215); report the direction only. The smaller Severe model fit worse (higher AIC), so we keep the full set.
+
+### Step 4: how far can we trust the safety effects?
+
+-   **Association, not cause.** Lifeguards, drones and flags were probably put where risk is high, which would hide some of their benefit. Treat the sizes as indicative.
+-   **Patrols follow the season.** Lifeguard hours are above zero in about 80% of beach-months from Sep to Apr and 12% from May to Aug. The month terms and `log_lg` share the credit, so the lifeguard effect depends on how season is modelled.
+-   **Reporting.** Patrolled and drone-covered beaches may record more incidents, which pushes totals up and could mask a real fall.
+-   **Overlap.** `campaign_idx` is set by postcode and is on in summer, so it is entangled with season and `first_aid_cap`. Do not over-read its exact size.
+-   **Earlier notes disagreed.** The earlier AI notes said lifeguards and campaigns barely reduce totals; here both show a clear fall (drones do not). We will check this in step 05 rather than assume either answer.
+
+### Takeaway
+
+Incidents per visitor are driven mainly by beach hazard (rips, swell), visitor mix (tourists) and time of year. Lifeguards, drones and safety campaigns are associated with fewer incidents, and the benefit is largest for the most serious ones, which is the group Task 2 cares about.
+
+## 5. Repeat for each severity
+
+Same structure for `n_mild`, `n_cc`, `n_sev`. `n_sev` has only about 220 events, so expect warnings and unstable coefficients, and it was close to Poisson in the EDA (variance about equal to the mean). Here it gets a small predictor set as well as the full one.
+
+```{r sev}
+# helper: fit a negative binomial on `train` for response y, using the shared predictor list unless a formula is given
+fit_nb <- function(y, f = make_formula(y)) glm.nb(f, data = train)
+
+m_mild <- fit_nb("n_mild")
+m_cc   <- fit_nb("n_cc")
+m_sev  <- fit_nb("n_sev")
+
+# small severe model: season, exposure-related and the safety levers only
+f_sev_small <- as.formula("n_sev ~ log_lg + log_drone + campaign_idx + air_temp_hi + swell_max_m + period_2021 + offset(log(visitors))")
+m_sev_small <- fit_nb("n_sev", f_sev_small)
+m_sev_pois  <- glm(make_formula("n_sev"), family = poisson, data = train)
+
+sapply(list(mild = m_mild, cc = m_cc, sev = m_sev, sev_small = m_sev_small), function(m) c(AIC = AIC(m), theta = m$theta))
+AIC(m_sev_pois, m_sev, m_sev_small)
+```
+
+Lowest AIC is only a tie-breaker (step 05 decides on out-of-sample scores). Read `theta` as dispersion: if it were huge, negative binomial would have collapsed to Poisson. Compare the severe AICs for Poisson, full negative binomial and the small model, and note what each tells you about whether extra predictors help.
+
+```{r rr_all}
+# rate ratios side by side for the safety levers (this is the part you interpret in section 4)
+sapply(list(all = m_nb, mild = m_mild, cc = m_cc, sev = m_sev), function(m)
+  round(exp(coef(m)[c("log_lg", "log_drone", "campaign_idx", "first_aid_cap", "pa_system", "flags")]), 3))
+```

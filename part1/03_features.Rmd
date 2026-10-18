@@ -1,0 +1,113 @@
+---
+title: "03 Features: a small, explainable set"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = normalizePath(".."))   # run from project root
+library(dplyr); library(tidyr); library(ggplot2); library(lubridate); library(MASS)
+select <- dplyr::select   # MASS masks select()
+```
+
+## Goal
+
+Choose and build a **small** set of predictors you can defend to a non-technical audience. Start small; add later only if validation says it helps.
+
+```{r load}
+panel <- readRDS("part1/panel.rds")
+```
+
+## Candidate features
+
+| Group | Variables | Why it might matter | Watch out |
+|------------------|------------------|------------------|------------------|
+| Exposure | `visitors` | more people, more incidents | enters as an **offset** in step 04 |
+| Season | month (or summer/winter) | beach use and conditions vary by season | month and `lg_hrs` are confounded (patrols are seasonal) |
+| Conditions | `swell_max_m`, `wind_days`, `rain_mm`, `air_temp_hi`, `water_temp`, `turbidity`, `marine_health` | hazard level | `swell_avg_m` \~ `swell_max_m` (r=0.96); air vs water temp r=0.79: keep one of each |
+| Safety | `lg_hrs`, `drone_hrs`, `campaign_idx`, `first_aid_cap`, `pa_system`, `flags`, `equip_rating` | the Task 2 levers | probably placed where risk is high (so effects are associations, not proven causes) |
+| Beach traits | `shore_len_m`, `n_rips`, `rocky`, `fishing`, `rockpool`, `surfer_prop`, `tourist_ratio` | static risk | `n_bins`, `icecream_visits` look like proxies: drop |
+
+Do **not** use anything from `incidents.csv` that is only known after an incident (e.g. `response_min`) as a predictor.
+
+## 1. Check correlations
+
+Only the candidate predictors go in (counts excluded). Pairs above \|r\| = 0.6 are listed so you can see the near-misses too.
+
+```{r corr}
+cand <- c("visitors", "swell_avg_m", "swell_max_m", "wind_days", "rain_mm", "air_temp_hi", "water_temp",
+          "turbidity", "lg_hrs", "drone_hrs", "campaign_idx", "first_aid_cap", "equip_rating",
+          "shore_len_m", "n_rips", "surfer_prop", "tourist_ratio", "n_bins", "icecream_visits")
+cm <- cor(panel[cand])
+hi <- which(abs(cm) > 0.6 & upper.tri(cm), arr.ind = TRUE)
+data.frame(a = rownames(cm)[hi[, 1]], b = colnames(cm)[hi[, 2]], r = round(cm[hi], 2)) %>% arrange(desc(abs(r)))
+```
+
+Reading it: - `swell_avg_m` / `swell_max_m` (0.96): near duplicates, **keep `swell_max_m`** (extreme swell is the hazard). - `air_temp_hi` / `water_temp` (0.79): **keep `air_temp_hi`**, it is the beach-use driver. - `rain_mm` / `turbidity` (0.77): turbidity is largely a consequence of rain, **keep `rain_mm`**. - `visitors` / `n_bins` (0.76) and `air_temp_hi` / `icecream_visits` (0.72): both are proxies for size and temperature, **drop `n_bins` and `icecream_visits`**. - `visitors` / `lg_hrs` (0.64) and `tourist_ratio` / `first_aid_cap` (-0.65): below the cut-off but worth remembering when you read coefficients, since correlated predictors share credit.
+
+Which variables vary within a beach over time, and which are fixed? This matters for the beach-effects model later:
+
+```{r static}
+panel %>% group_by(beach_nm) %>%
+  summarise(across(c(n_rips, rocky, fishing, rockpool, shore_len_m, pa_system, flags, equip_rating,
+                     surfer_prop, tourist_ratio), n_distinct)) %>%
+  summarise(across(-beach_nm, max))   # 1 = never changes within a beach
+```
+
+`n_rips`, `rocky`, `fishing`, `rockpool` and `shore_len_m` are fixed per beach. `pa_system` and `flags` change for some beaches over time (installed during the period), `equip_rating` is updated each year, and `surfer_prop` and `tourist_ratio` move monthly.
+
+## 2. Build the features
+
+```{r build}
+panel_f <- panel %>% mutate(
+  # exposure 
+  log_visitors = log(visitors),
+  # time: calendar month (seasonality) and the 2020-21 low-rate period seen in the EDA
+  mon    = factor(month(month_date)),
+  fy     = ifelse(month(month_date) >= 9, year(month_date) + 1, year(month_date)),
+  period_2021 = as.integer(fy %in% c(2020, 2021)),
+  # conditions
+  marine_health = factor(marine_health, levels = c("L", "M", "H"), ordered = TRUE),
+  # safety: log1p because hours are skewed with many zeros and likely diminishing returns
+  log_lg    = log1p(lg_hrs),
+  log_drone = log1p(drone_hrs),
+  # beach traits
+  rips_per_km = n_rips / (shore_len_m / 1000)
+)
+dim(panel_f)
+```
+
+Kept as they are: `swell_max_m`, `wind_days`, `rain_mm`, `air_temp_hi`, `campaign_idx`, `first_aid_cap`, `pa_system`, `flags`, `equip_rating`, `rocky`, `fishing`, `rockpool`, `surfer_prop`, `tourist_ratio`, `shore_len_m`.
+
+Two choices to be aware of: - **Month as a factor** uses 11 parameters; a cheaper alternative is a summer/winter flag or `sin`/`cos` of the month. Start with the factor and test the simpler ones in step 05. - **`period_2021`** is a blunt flag for the dip in FY2020-21. It is a stand-in for something we can't see in the data, so state that as a limitation.
+
+Sanity checks:
+
+```{r checks}
+summary(panel_f[c("log_visitors", "log_lg", "log_drone", "rips_per_km")])
+table(panel_f$marine_health, useNA = "ifany")
+table(panel_f$period_2021)
+```
+
+## 3. Decision log
+
+| Feature | Kept? | Reason |
+|------------------------|------------------------|------------------------|
+| `log_visitors` / `visitors` | yes | exposure; offset or normal term decided in step 05 |
+| `mon` (month factor) | yes | seasonality; confounded with patrol hours |
+| `period_2021` | yes | the 2020-21 drop in the EDA; unexplained |
+| `swell_max_m` | yes | hazard; replaces `swell_avg_m` (r = 0.96) |
+| `air_temp_hi` | yes | beach-use driver; replaces `water_temp` (r = 0.79) |
+| `rain_mm` | yes | replaces `turbidity` (r = 0.77) |
+| `wind_days`, `marine_health` | yes | conditions, no strong overlap |
+| `log_lg`, `log_drone` | yes | Task 2 levers; associations, not proven causes |
+| `campaign_idx`, `first_aid_cap`, `pa_system`, `flags`, `equip_rating` | yes | Task 2 levers or safety status |
+| `rips_per_km`, `rocky`, `fishing`, `rockpool`, `shore_len_m` | yes | fixed beach hazard traits (`rips_per_km` and `n_rips` overlap, use one) |
+| `surfer_prop`, `tourist_ratio` | yes | visitor mix |
+| `swell_avg_m`, `water_temp`, `turbidity` | no | near duplicates of kept variables |
+| `n_bins`, `icecream_visits` | no | proxies for beach size and temperature |
+| `response_min` (incidents file) | no | known only after an incident, so it cannot be a predictor |
+
+```{r save}
+saveRDS(panel_f, "part1/panel_f.rds")
+```

@@ -1,0 +1,50 @@
+---
+title: "06 Forecast: next year's expected incidents"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = normalizePath(".."))   # run from project root
+library(dplyr); library(tidyr); library(ggplot2); library(lubridate); library(MASS)
+select <- dplyr::select   # MASS masks select()
+```
+
+## Goal
+Expected incidents for Sep 2026 to Aug 2027 by beach, month and severity, using your chosen model from step 05, **refitted on all the data**.
+
+## The key problem
+The model needs next year's inputs (visitors, weather, safety hours) which we do not have. We must **assume** them and state it. Defaults to consider:
+- visitors, weather, conditions: the average of the same calendar month over recent years (maybe adjusted for trend)
+- safety inputs (lg_hrs, drone_hrs, campaign, ...): same as the latest year (a "no extra funding" baseline, which Task 2 will then change)
+- static traits: unchanged
+
+```{r load}
+panel_f <- readRDS("part1/panel_f.rds")
+```
+
+## 1. Refit on all data  (YOU)
+```{r refit}
+# TODO (you): final_nb <- glm.nb(...)  for n_mild, n_cc, n_sev (or your chosen structure)
+```
+
+## 2. Build next year's input table  (YOU)
+```{r newdata}
+# TODO (you): newdata with one row per beach x month (80 x 12 = 960 rows), month_date = 2026-09 .. 2027-08,
+#   inputs filled by your assumptions above.
+```
+
+## 3. Predict and summarise  (YOU)
+```{r predict}
+# TODO (you): newdata$mu_mild <- predict(..., newdata, type = "response"), etc.
+#   Summaries: total by severity; by month; top 10 beaches for severe; a map of when/where.
+```
+
+## 4. Uncertainty
+Point forecasts are not enough for the panel. Think about how to show a range (simulate from the negative binomial with `rnbinom`, or use the standard errors from `predict(se.fit = TRUE)`).
+```{r unc}
+# TODO (you)
+```
+
+## 5. Assumptions and limitations (fill in)
+- 

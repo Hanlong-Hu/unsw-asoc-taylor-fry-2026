@@ -1,0 +1,86 @@
+---
+title: "05 Validation: choose the best model out of sample"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = normalizePath(".."))   # run from project root
+library(dplyr); library(tidyr); library(ggplot2); library(lubridate); library(MASS)
+select <- dplyr::select   # MASS masks select()
+```
+
+## Goal
+
+Score candidate models on data they have not seen, and pick one.
+
+## Criteria (and why)
+
+| Metric | Meaning | Role |
+|------------------------|------------------------|------------------------|
+| **Negative log-likelihood (log score)** on test data | how much probability the model gave to what happened; penalises overconfidence | **primary** |
+| Poisson deviance | generalised squared error for counts | secondary |
+| MAE of annual beach totals | average miss in incidents per beach per year; easy to explain | secondary |
+| Predicted / actual total | calibration: are we right in total? | check |
+| Severe only: top-10 beach capture | share of actual severe incidents that fall in the 10 beaches we ranked highest (random = 12.5%) | check |
+| AIC / BIC | in-sample fit, penalised for size | tie-breaker only |
+
+**Why time-based:** the forecast is for the *future*, so we test on the
+future. Random splits leak (same beach, adjacent months).
+
+```{r load}
+panel_f <- readRDS("part1/panel_f.rds")
+```
+
+## 1. Single split first (YOU)
+
+Train: months before Sep 2025. Test: Sep 2025 to Aug 2026.
+
+```{r split}
+# TODO (you): train / test data frames
+```
+
+## 2. Scoring functions (YOU)
+
+For negative binomial with mean `mu` and dispersion `theta`:
+`-dnbinom(y, mu = mu, size = theta, log = TRUE)`, summed or averaged
+over test rows.
+
+```{r score}
+# TODO (you): nll_nb <- function(y, mu, theta) ...
+# TODO (you): dev_pois <- function(y, mu) ...   # 2*sum(ifelse(y==0, 0, y*log(y/mu)) - (y-mu))
+# TODO (you): mae_beach_year <- function(...) ...  # aggregate to beach totals first
+```
+
+## 3. Compare candidate models (YOU)
+
+Suggested candidates (add your own): 1. visitors only (offset +
+intercept) 2. + season 3. + conditions 4. + safety 5. + beach traits 6.
+beach fixed effects (`factor(beach_nm)`) instead of traits
+
+```{r compare}
+# TODO (you): fit each on train with glm.nb, predict(type = "response") on test, fill the table
+results <- data.frame(model = character(), nll = numeric(), dev = numeric(), mae = numeric(), ratio = numeric())
+```
+
+Note: `predict()` for a beach-fixed-effects model needs beaches seen in
+train (they all are here).
+
+## 4. Rolling origin (once the single split works) (YOU)
+
+Repeat with several cut-offs (e.g. test years FY2022, FY2023, FY2024,
+FY2025, each training on everything earlier). Average the log score
+across folds; look at the spread. A model that wins in every fold is
+more trustworthy than one that wins on average.
+
+```{r rolling}
+# TODO (you)
+```
+
+## 5. Decision
+
+Write: which model, which criterion decided it, and how close the
+runner-up was. If close, take the simpler one.

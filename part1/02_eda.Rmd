@@ -1,0 +1,118 @@
+---
+title: "02 EDA: what do the counts look like?"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = normalizePath(".."))   # run from project root
+library(dplyr); library(tidyr); library(ggplot2); library(lubridate); library(MASS)
+select <- dplyr::select   # MASS masks select()
+```
+
+## Goal
+
+Understand the response before choosing a model. Three questions: how are counts distributed, do they scale with visitors, and is there seasonality or a trend?
+
+```{r load}
+# panel from step 01 -- save it there with saveRDS(panel, "part1/panel.rds"), then:
+panel <- readRDS("part1/panel.rds")
+```
+
+## 1. Mean vs variance (YOU)
+
+Poisson assumes variance = mean. Real counts are usually more spread out (**overdispersion**), which is why we will use negative binomial.
+
+```{r disp}
+vars <- c("n_mild", "n_cc", "n_sev")
+sapply(panel[vars], function(x) c(
+  mean   = mean(x, na.rm = TRUE),
+  var    = var(x, na.rm = TRUE),
+  pct_0  = mean(x == 0, na.rm = TRUE) * 100
+))
+```
+
+What to look for: variance much bigger than the mean means Poisson is too confident; many zeros for n_sev is a sparsity warning.
+
+## 2. Counts over time
+
+Add a month-of-year and a year column first; the same table feeds the seasonal and trend views.
+
+```{r time}
+panel <- panel %>% mutate(mon = month(month_date), yr = year(month_date),
+                          fy = ifelse(mon >= 9, yr + 1, yr))   # Sep-Aug year, labelled by the year it ends
+
+monthly <- panel %>% group_by(month_date) %>%
+  summarise(across(c(n_mild, n_cc, n_sev), sum), visitors = sum(visitors), .groups = "drop") %>%
+  pivot_longer(c(n_mild, n_cc, n_sev), names_to = "severity", values_to = "n")
+
+# One panel per severity: they sit on very different scales, so free y-axes
+ggplot(monthly, aes(month_date, n)) + geom_line() +
+  facet_wrap(~severity, ncol = 1, scales = "free_y") +
+  labs(x = NULL, y = "incidents per month (all beaches)")
+
+# Seasonal shape: average by calendar month
+panel %>% group_by(mon) %>%
+  summarise(across(c(n_mild, n_cc, n_sev), sum), visitors = sum(visitors)) %>%
+  mutate(mild_per_100k_visits = n_mild / visitors * 1e5,
+         sev_per_100k_visits  = n_sev  / visitors * 1e5)
+
+# Trend: totals by Sep-Aug year
+panel %>% group_by(fy) %>%
+  summarise(across(c(n_mild, n_cc, n_sev), sum), visitors = sum(visitors)) %>%
+  mutate(mild_per_100k = n_mild / visitors * 1e5, sev_per_100k = n_sev / visitors * 1e5)
+```
+
+Look at: how much of the seasonal shape is just visitors (compare the raw counts with the per-visit rates), and any year where the level or the rate steps down.
+
+## 3. Counts vs exposure
+
+```{r exposure}
+m <- month(panel$month_date)   # calendar month (computed here so this chunk runs on its own)
+panel$season <- ifelse(m %in% c(11, 12, 1, 2), "summer (Nov-Feb)",
+                ifelse(m %in% c(5, 6, 7, 8), "winter (May-Aug)", "shoulder"))
+
+ggplot(panel, aes(log(visitors), log(n_all + 1), colour = season)) +
+  geom_point(alpha = 0.25, size = 0.8) + geom_smooth(method = "lm", se = FALSE)
+
+# Slope of log(count) on log(visitors): 1 would mean "count rises one-for-one with visitors"
+coef(lm(log(n_all + 1) ~ log(visitors), data = panel))
+coef(glm(n_all ~ log(visitors), family = poisson, data = panel))   # cleaner: handles zeros properly
+```
+
+Why it matters for step 04: `offset(log(visitors))` forces the slope to be exactly 1. If the Poisson slope is clearly below 1 (the earlier notes saw about 0.9), the offset is a simplification: you may prefer `log(visitors)` as a normal term and let the data pick the exponent. Compare both in step 05.
+
+## 4. Which beaches?
+
+```{r beaches}
+by_beach <- panel %>% group_by(beach_nm) %>%
+  summarise(n_all = sum(n_all), n_sev = sum(n_sev), visitors = sum(visitors),
+            shore_len_m = first(shore_len_m), .groups = "drop") %>%
+  mutate(all_per_100k = n_all / visitors * 1e5, sev_per_100k = n_sev / visitors * 1e5)
+
+by_beach %>% arrange(desc(n_all)) %>% head(10)
+by_beach %>% arrange(desc(n_sev)) %>% head(10)
+
+# Is it simply "big beaches have more"? Correlation of totals with visitors, and rate spread
+cor(by_beach$n_all, by_beach$visitors)
+cor(by_beach$n_sev, by_beach$visitors)
+summary(by_beach$all_per_100k)
+
+ggplot(by_beach, aes(visitors, n_all)) + geom_point() + scale_x_log10() + scale_y_log10()
+```
+
+If beaches with similar visitors have very different totals, there is beach-specific risk beyond size, which supports static traits or beach effects in the model.
+
+## Write down (2-3 sentences each, in your own words)
+
+-   Is there overdispersion?
+
+    Variance largely overpowers the mean, this negates the poisson assumption and suggests overdispersion.
+
+-   What seasonal pattern is there?
+
+    Months outside summer see higher rates of incidents
+
+-   Anything odd in time that a model must handle?
+
+    there were noticeably higher rates of incidents in 2017-2019

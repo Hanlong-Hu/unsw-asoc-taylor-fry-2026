@@ -1,0 +1,92 @@
+---
+title: "01 Data prep: build the beach-month panel"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = normalizePath(".."))   # run from project root
+library(dplyr); library(tidyr); library(ggplot2); library(lubridate); library(MASS)
+select <- dplyr::select   # MASS masks select()
+```
+
+## Goal
+
+One row per beach per month, with the **count of incidents by severity** next to the beach conditions. That table is what every model uses.
+
+## Why
+
+`incidents.csv` has one row per *person* (a single incident can involve up to 3 people). We predict *incidents*, so we first collapse people into incidents, taking the **worst** severity of the people involved (Mild \< CloseCall \< Severe).
+
+## 1. Load the data
+
+```{r load}
+beach <- read.csv("beach_monthly.csv")
+inc   <- read.csv("incidents.csv")
+dim(beach); dim(inc)
+```
+
+## 2. Parse the dates (provided)
+
+`month` in `beach` is "mm/yyyy" text. `dte_occurred` in `inc` is "dd/mm/yyyy" text.
+
+```{r dates}
+beach$month_date <- my(beach$month)                       # first day of the month
+inc$date         <- dmy(inc$dte_occurred)
+inc$month_date   <- floor_date(inc$date, "month")
+range(beach$month_date); range(inc$date)
+```
+
+## 3. Collapse people to incidents 
+
+Hint: give each severity a rank (Mild=1, CloseCall=2, Severe=3), then `group_by(incident_id)` and take the max rank. Keep the beach and month (they are the same for every person in an incident, so `first()` works).
+
+```{r incidents}
+# build `inc1`, one row per incident_id with columns
+#   incident_id, beach_nm, month_date, worst  (worst = "Mild" / "CloseCall" / "Severe")
+# inc1 <- inc %>% ...
+
+inc1 <- inc %>% 
+  mutate(inc_rank = case_when(
+    inc_type == "Mild" ~ 1, 
+    inc_type == "CloseCall" ~ 2,
+    inc_type == "Severe" ~ 3
+  ))
+inc2 <- inc1 %>% group_by(incident_id) %>% slice_max(inc_rank, n = 1, with_ties = FALSE) %>% ungroup()
+```
+
+## 4. Count by beach-month and severity 
+
+Hint: `count(beach_nm, month_date, worst)` then `pivot_wider(..., values_fill = 0)`. Beach-months with **no** incidents will be missing after the count, so you must join onto the full panel and fill the gaps with 0.
+
+```{r counts}
+# build `counts` with columns beach_nm, month_date, n_mild, n_cc, n_sev
+counts <- inc2 %>% count(beach_nm, month_date, inc_type, sort = TRUE) %>% pivot_wider(names_from = inc_type, values_from = n, values_fill = 0) %>% rename(
+  n_mild = Mild,
+  n_cc = CloseCall,
+  n_sev = Severe
+)
+```
+
+## 5. Join onto the panel (YOU)
+
+```{r join}
+# panel <- left_join(beach, counts, by = ...) and replace NA counts with 0.
+#   Then add n_all = n_mild + n_cc + n_sev
+panel <- left_join(beach, counts, by = c("beach_nm", "month_date"))
+vars <- c("n_mild", "n_cc", "n_sev")
+panel <- panel %>% mutate(across(c("n_mild", "n_cc", "n_sev"), ~replace_na(.x, 0)))
+panel <- panel %>% mutate(n_all = n_mild + n_cc + n_sev)
+saveRDS(panel, "part1/panel.rds")   # used by step 02 onwards
+nrow(panel)
+```
+
+## 6. Sanity checks (should all hold)
+
+```{r checks, eval=FALSE}
+stopifnot(nrow(panel) == 9600)
+stopifnot(nrow(inc2) == 32459)
+colSums(panel[, c("n_mild","n_cc","n_sev")])   # expect about 28997 / 3242 / 220
+```
+
+If a number differs, find out why before moving on.
