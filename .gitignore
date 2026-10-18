@@ -10,3 +10,8 @@
 *.RData
 .Rhistory
 .Rproj.user/
+
+# Personal / team notes
+meeting_*.md
+zoom-meeting.md
+timeline_plan.md
