@@ -11,7 +11,7 @@ select <- dplyr::select   # MASS masks select()
 ```
 
 ## Goal
-Expected incidents for Sep 2026 to Aug 2027 by beach, month and severity, using your chosen model from step 05, **refitted on all the data**.
+Expected incidents for Sep 2026 to Aug 2027 (FY2027) by beach, month and severity, using the models chosen in step 05, **refitted on all the data**.
 
 ## The key problem
 The model needs next year's inputs (visitors, weather, safety hours) which we do not have. We must **assume** them and state it. Defaults to consider:
@@ -21,30 +21,267 @@ The model needs next year's inputs (visitors, weather, safety hours) which we do
 
 ```{r load}
 panel_f <- readRDS("part1/panel_f.rds")
+specs   <- readRDS("part1/chosen_specs.rds")   # from step 05: mild = beach fixed effects, cc and sev = traits model
+ys      <- c(mild = "n_mild", cc = "n_cc", sev = "n_sev")
+sev_lab <- c(mild = "Mild", cc = "Close call", sev = "Severe")
 ```
 
-## 1. Refit on all data  (YOU)
+## 1. Refit on all data
+Same three models as step 05, now trained on all ten years (FY2017 to FY2026). More data, and the latest year is the closest to next year.
+
 ```{r refit}
-# TODO (you): final_nb <- glm.nb(...)  for n_mild, n_cc, n_sev (or your chosen structure)
+make_f  <- function(y, s) as.formula(paste(y, "~", paste(s$rhs, collapse = " + "), "+ offset(log(visitors))"))
+fit_all <- function(d) setNames(lapply(names(ys), function(k) glm.nb(make_f(ys[k], specs[[k]]), data = d)), names(ys))
+
+final <- fit_all(panel_f)
+sapply(final, function(m) c(theta = m$theta, n_coef = length(coef(m)), AIC = AIC(m)))
 ```
 
-## 2. Build next year's input table  (YOU)
+`theta` falls from about 4.6 (mild) to 1.5 (severe): the rarer the incident, the more overdispersed relative to its mean, so the wider the ranges in section 5 will be.
+
+## 2. Build next year's input table
+One row per beach x month: 80 x 12 = 960 rows. Each input group gets its own rule:
+
+| Input | Assumption | Why |
+|----|----|----|
+| `visitors` | mean of the same beach-month over the last 3 years (FY2024 to FY2026), grown at the recent annual rate for 2 years | 3 years smooth out one-off busy or quiet months; the 3-year mean is centred on FY2025, so it needs 2 years of growth to reach FY2027. The growth rate uses FY2024 to FY2026 only, because earlier years still include the FY2020-21 dip and recovery |
+| `surfer_prop`, `tourist_ratio` | mean of the same beach-month over the last 3 years | visitor mix moves slowly |
+| Safety: `lg_hrs`, `drone_hrs`, `campaign_idx`, `first_aid_cap`, `pa_system`, `flags`, `equip_rating` | same beach-month as FY2026 | the **"no extra funding" baseline**: what happens if nothing changes. Task 2 changes these inputs and re-predicts |
+| Beach traits | unchanged | they are fixed |
+| `period_2021` | 0 | the dip was a one-off |
+| Weather: `swell_max_m`, `wind_days`, `rain_mm`, `air_temp_hi`, `marine_health` | **replay each of the 10 past years** and average the 10 forecasts | see below |
+
+**Why replay weather instead of averaging it.** The model is multiplicative, so risk rises faster than linearly with swell (each extra metre multiplies severe incidents by about 2). One big-swell month adds more incidents than one calm month takes away. Putting an *average* swell into the model therefore understates the *average* number of incidents. Replaying each past year's actual weather keeps the rough months in, and the spread across the 10 replays also shows how much weather alone can move the forecast. Section 3 checks that this matters.
+
 ```{r newdata}
-# TODO (you): newdata with one row per beach x month (80 x 12 = 960 rows), month_date = 2026-09 .. 2027-08,
-#   inputs filled by your assumptions above.
+wvars <- c("swell_max_m", "wind_days", "rain_mm", "air_temp_hi", "marine_health")
+
+# Everything except weather, for target year `target_fy`, using only data before it
+build_newdata <- function(hist, target_fy) {
+  last  <- target_fy - 1
+  vis   <- hist %>% group_by(fy) %>% summarise(v = sum(visitors))
+  g     <- sqrt(vis$v[vis$fy == last] / vis$v[vis$fy == last - 2])   # annual growth over the last 2 years
+  recent <- hist %>% filter(fy %in% (last - 2):last) %>% group_by(beach_nm, mon) %>%
+    summarise(visitors = mean(visitors) * g^2, across(c(surfer_prop, tourist_ratio), mean), .groups = "drop")
+  hist %>% filter(fy == last) %>%                              # safety and traits as in the latest year
+    select(beach_nm, postcode, mon, lg_hrs, drone_hrs, campaign_idx, first_aid_cap, pa_system, flags,
+           equip_rating, rips_per_km, rocky, fishing, rockpool, shore_len_m) %>%
+    left_join(recent, by = c("beach_nm", "mon")) %>%
+    mutate(m = as.integer(as.character(mon)),
+           month_date = as.Date(sprintf("%d-%02d-01", ifelse(m >= 9, target_fy - 1, target_fy), m)),
+           fy = target_fy, period_2021 = 0L, log_lg = log1p(lg_hrs), log_drone = log1p(drone_hrs)) %>%
+    select(-m) %>% structure(growth = g)
+}
+
+# Attach the weather of past year w (same beach, same calendar month)
+with_weather <- function(nd, hist, w) nd %>%
+  left_join(hist %>% filter(fy == w) %>% select(beach_nm, mon, all_of(wvars)), by = c("beach_nm", "mon"))
+
+# Expected count per row for each severity, averaged over the weather replays
+predict_replay <- function(fits, nd, hist) {
+  ws <- sort(unique(hist$fy))
+  for (k in names(fits)) {
+    mus <- sapply(ws, function(w) predict(fits[[k]], with_weather(nd, hist, w), type = "response"))
+    nd[[paste0("mu_", k)]] <- rowMeans(mus)
+  }
+  nd
+}
+
+newdata <- build_newdata(panel_f, 2027)
+c(rows = nrow(newdata), beaches = n_distinct(newdata$beach_nm), growth = attr(newdata, "growth"))
+range(newdata$month_date)
+c(visitors_FY2026 = sum(panel_f$visitors[panel_f$fy == 2026]), visitors_FY2027_assumed = sum(newdata$visitors))
 ```
 
-## 3. Predict and summarise  (YOU)
+Assumed visitors for FY2027 are about 29.9 million, 1.6% above FY2026 (29.5 million), using growth of 1.9% a year.
+
+## 3. Does the recipe work? Backtest on FY2026
+Pretend it is August 2025: fit on FY2017 to FY2025, build FY2026 inputs with the *same rules*, and compare with what happened. This checks the assumptions, not just the model.
+
+```{r backtest}
+hist_bt  <- filter(panel_f, fy < 2026)
+fits_bt  <- fit_all(hist_bt)
+actual26 <- filter(panel_f, fy == 2026)
+nd_bt    <- predict_replay(fits_bt, build_newdata(hist_bt, 2026), hist_bt)
+
+# Same recipe but weather averaged instead of replayed, to show why replay matters
+nd_avg <- build_newdata(hist_bt, 2026) %>%
+  left_join(hist_bt %>% group_by(beach_nm, mon) %>%
+              summarise(across(c(swell_max_m, wind_days, rain_mm, air_temp_hi), mean),
+                        marine_health = names(which.max(table(marine_health))), .groups = "drop") %>%
+              mutate(marine_health = factor(marine_health, levels = c("L", "M", "H"), ordered = TRUE)),
+            by = c("beach_nm", "mon"))
+
+bt <- sapply(names(ys), function(k) c(
+  assumed_inputs_replay  = sum(nd_bt[[paste0("mu_", k)]]),
+  assumed_inputs_average = sum(predict(fits_bt[[k]], nd_avg, type = "response")),
+  actual_inputs          = sum(predict(fits_bt[[k]], actual26, type = "response")),
+  actual                 = sum(actual26[[ys[k]]])))
+round(bt, 1)
+```
+
+Reading it:
+
+- **Assumed inputs cost almost nothing.** With weather replay, the forecast made from assumed inputs is within 2 to 3% of the forecast made from the real FY2026 inputs, for every severity. So nearly all the forecast error is in the model and in chance, not in the input assumptions.
+- **Replaying weather matters for severe.** Averaged weather gives about 17.8 severe incidents; replay gives about 19.1, matching the 19.2 from the actual inputs. That is the curvature effect described in section 2.
+- **FY2026 itself was a bad year for severe** (26 actual vs about 19 expected). Mild and close calls were slightly overpredicted (3% to 5%). Section 5 asks whether 26 was inside the range we would have quoted.
+
+## 4. Predict and summarise
 ```{r predict}
-# TODO (you): newdata$mu_mild <- predict(..., newdata, type = "response"), etc.
-#   Summaries: total by severity; by month; top 10 beaches for severe; a map of when/where.
+fc <- predict_replay(final, newdata, panel_f) %>%
+  mutate(mu_all = mu_mild + mu_cc + mu_sev, mu_serious = mu_cc + mu_sev)
+
+# Totals by severity, against the last two years
+hist_tot <- panel_f %>% filter(fy %in% 2025:2026) %>% group_by(fy) %>%
+  summarise(mild = sum(n_mild), cc = sum(n_cc), sev = sum(n_sev))
+tot <- rbind(as.data.frame(hist_tot) %>% mutate(fy = paste0("FY", fy, " actual")),
+             data.frame(fy = "FY2027 forecast", mild = sum(fc$mu_mild), cc = sum(fc$mu_cc), sev = sum(fc$mu_sev))) %>%
+  mutate(all = mild + cc + sev)
+knitr::kable(tot, digits = 1, col.names = c("", "Mild", "Close call", "Severe", "All"))
 ```
 
-## 4. Uncertainty
-Point forecasts are not enough for the panel. Think about how to show a range (simulate from the negative binomial with `rnbinom`, or use the standard errors from `predict(se.fit = TRUE)`).
+About 3,600 mild incidents, 316 close calls and 21 severe incidents are expected next year, about 3,930 in total.
+
+- Mild and close calls are about 7% above FY2026, more than visitor growth alone (1.6%). FY2026 came in below what the model expected (backtest, section 3), and the forecast goes back to the model's usual level, not to last year's actual.
+- Severe is below FY2026's unusually high 26 and close to the 10-year average of 22.
+
+### When
+```{r by_month}
+by_month <- fc %>% group_by(mon) %>%
+  summarise(visitors = sum(visitors), across(c(mu_mild, mu_cc, mu_sev, mu_all), sum)) %>%
+  mutate(sev_per_m_visits = mu_sev / visitors * 1e6,
+         mon = factor(month.abb[as.integer(as.character(mon))], levels = month.abb[c(9:12, 1:8)])) %>%
+  arrange(mon)
+knitr::kable(by_month, digits = 2)
+
+by_month %>% select(mon, Mild = mu_mild, `Close call` = mu_cc, Severe = mu_sev) %>%
+  pivot_longer(-mon, names_to = "severity", values_to = "mu") %>%
+  mutate(severity = factor(severity, levels = c("Mild", "Close call", "Severe"))) %>%
+  ggplot(aes(mon, mu, group = 1)) + geom_line() + geom_point() +
+  facet_wrap(~severity, ncol = 1, scales = "free_y") +
+  labs(x = NULL, y = "expected incidents (all beaches)", title = "FY2027 forecast by month")
+```
+
+- **Mild incidents follow the crowds:** they peak in January (about 460) and are lowest in June and July.
+- **Close calls are roughly flat** at about 25 to 30 a month, apart from dips in November and February. Winter has a fifth of summer's visitors but the same number of close calls.
+- **Severe incidents peak in winter.** May to August holds about 44% of expected severe incidents (about 9.5 of 21.4), against about 26% for December to February. Per visit, a winter visit is about 4 to 7 times riskier than a summer one (1.6 to 2.8 severe per million visits, against about 0.4). Rougher seas and few patrols explain most of the gap (step 04: swell and lifeguard hours).
+- For Task 2 this is the key "when": the severe risk is in the off-season, when patrols are thinnest, not in the busy summer.
+
+### Where
+```{r top_beaches}
+by_beach <- fc %>% group_by(beach_nm) %>%
+  summarise(visitors = sum(visitors), across(c(mu_mild, mu_cc, mu_sev, mu_all), sum),
+            lg_hrs = sum(lg_hrs), drone_hrs = sum(drone_hrs), rips_per_km = first(rips_per_km)) %>%
+  mutate(sev_per_m_visits = mu_sev / visitors * 1e6,
+         share_sev = mu_sev / sum(mu_sev))
+
+top_sev <- by_beach %>% arrange(desc(mu_sev)) %>% slice(1:10)
+knitr::kable(top_sev %>% select(beach_nm, mu_sev, share_sev, mu_cc, visitors, sev_per_m_visits, lg_hrs, drone_hrs, rips_per_km),
+             digits = c(0, 2, 3, 1, 0, 2, 0, 0, 1), caption = "Top 10 beaches by expected severe incidents, FY2027")
+c(top10_share_of_severe = sum(top_sev$mu_sev) / sum(by_beach$mu_sev))
+```
+
+```{r heatmap, fig.height = 7}
+# When and where: expected serious incidents (close call + severe) for the 20 riskiest beaches
+top20 <- by_beach %>% arrange(desc(mu_cc + mu_sev)) %>% slice(1:20) %>% pull(beach_nm)
+fc %>% filter(beach_nm %in% top20) %>%
+  mutate(mon = factor(month.abb[as.integer(as.character(mon))], levels = month.abb[c(9:12, 1:8)]),
+         beach_nm = factor(beach_nm, levels = rev(top20))) %>%
+  ggplot(aes(mon, beach_nm, fill = mu_serious)) + geom_tile(colour = "white") +
+  scale_fill_gradient(low = "#f7fbff", high = "#08306b", name = "expected\nserious") +
+  labs(x = NULL, y = NULL, title = "Expected close calls + severe incidents, FY2027 (top 20 beaches)")
+```
+
+The top 10 beaches hold about half of all expected severe incidents (50%), so resources can be targeted. They fall into two kinds:
+
+- **Busy, well-patrolled beaches** (North Wollongong, Bondi, Dee Why, Terrigal, Maroubra): high counts because of volume. Per-visit risk is ordinary (about 0.4 to 1.2 per million visits) and lifeguard hours are already high (15,000 to 23,000 a year).
+- **Quieter, under-patrolled, high-hazard beaches** (Seven Mile Beach at Lennox Head, Copacabana): per-visit risk of 2 to 3 per million, the highest in the table, with only about 3,000 lifeguard hours a year. Copacabana has 5 rips per km and no drone hours. Extra money is likely to go further at these beaches, which is the obvious lead for Task 2.
+
+North Wollongong stands out: it is top for severe (2.0 a year, 9% of the total) and has no drone hours.
+
+How to read these: the top-10 table is the "where" for severe incidents. Compare `mu_sev` (the count) with `sev_per_m_visits` (the risk per visit). A busy beach can be top 10 on volume alone, while a quiet beach with many rips can be risky per visit but small in count. The heatmap uses close calls plus severe because severe alone is too sparse to show a pattern per month. Close calls are the near-misses that come before severe incidents.
+
+## 5. Uncertainty
+A point forecast of 21 severe incidents hides a wide range. We simulate 5,000 possible years, with three sources of uncertainty in each:
+
+1. **Weather:** draw one of the 10 past years' weather (the same year for every beach, since a stormy winter hits the whole coast).
+2. **Parameters:** draw the coefficients from their estimated sampling distribution, `MASS::mvrnorm(coef, vcov)`. This covers the fact that the effects are estimated, which matters most for severe (wide intervals).
+3. **Chance:** draw each beach-month's count from the negative binomial with that mean and `theta`.
+
+`theta` is held at its estimate (a small understatement of the range).
+
+The simulated mean is a little above the point forecast (about 23 vs 21.4 severe). Coefficients enter through `exp()`, so drawing them with uncertainty pushes the average up more than down. The point forecast is the "best estimate", and the simulation adds a fair allowance for not knowing the effects exactly.
+
 ```{r unc}
-# TODO (you)
+set.seed(2027)
+simulate_totals <- function(fits, nd, hist, n_sim = 5000) {
+  ws <- sort(unique(hist$fy))
+  # design matrices per weather year, built once
+  X <- lapply(fits, function(m) lapply(ws, function(w)
+    model.matrix(delete.response(terms(m)), with_weather(nd, hist, w), xlev = m$xlevels)))
+  off <- log(nd$visitors)
+  sims <- sapply(names(fits), function(k) {
+    m <- fits[[k]]; b_ok <- !is.na(coef(m))
+    betas <- mvrnorm(n_sim, coef(m)[b_ok], vcov(m))
+    w_draw <- sample(seq_along(ws), n_sim, replace = TRUE)
+    sapply(seq_len(n_sim), function(s) {
+      mu <- exp(X[[k]][[w_draw[s]]][, b_ok, drop = FALSE] %*% betas[s, ] + off)
+      sum(rnbinom(length(mu), mu = mu, size = m$theta))
+    })
+  })
+  as.data.frame(sims) %>% mutate(all = mild + cc + sev)
+}
+summ <- function(sims) t(sapply(sims, function(x) c(mean = mean(x), quantile(x, c(0.05, 0.25, 0.5, 0.75, 0.95)))))
+
+sims <- simulate_totals(final, newdata, panel_f)
+knitr::kable(summ(sims), digits = 0, caption = "FY2027 simulated totals (5,000 years)")
+c(P_sev_at_least_26 = mean(sims$sev >= 26), P_sev_at_most_15 = mean(sims$sev <= 15))
 ```
 
-## 5. Assumptions and limitations (fill in)
-- 
+```{r unc_plot}
+ggplot(sims, aes(sev)) + geom_histogram(binwidth = 1, fill = "grey40") +
+  geom_vline(xintercept = quantile(sims$sev, c(0.05, 0.95)), linetype = "dashed") +
+  labs(x = "severe incidents in FY2027", y = "simulated years", title = "Range of severe incidents, no extra funding")
+```
+
+**Would this range have covered FY2026?** The same simulation from the backtest fit (data to FY2025, assumed FY2026 inputs):
+
+```{r unc_backtest}
+sims_bt <- simulate_totals(fits_bt, build_newdata(hist_bt, 2026), hist_bt)
+cbind(summ(sims_bt)[c("mild", "cc", "sev"), c("5%", "50%", "95%")],
+      actual = colSums(actual26[c("n_mild", "n_cc", "n_sev")]))
+```
+
+All three FY2026 actuals sit inside the 90% ranges we would have quoted a year ahead: mild 3,371 (range about 3,265 to 3,711), close calls 293 (270 to 356), severe 26 (13 to 30, near the top end). So the ranges are honest, and the 26 severe incidents in FY2026 were unlucky but not a sign that the model is broken.
+
+How to present this: "We expect about 21 to 23 severe incidents next year if funding does not change, and 9 years in 10 between about 15 and 33." A year as bad as FY2026 (26 or more) has about a 1 in 3 chance. For mild and close calls the range is narrow in relative terms (more events, so chance averages out). For severe it is wide, so Task 2 should judge interventions on how much they lower the *expected* number (and the per-visit risk), not on whether a single year comes in under a target.
+
+## 6. Hand-off table for Task 2
+One row per beach x month with the inputs used and the expected counts. Task 2 changes the safety inputs in `newdata` and calls `predict_replay(final, newdata_changed, panel_f)` to get the new expected counts.
+
+```{r save}
+forecast_fy2027 <- fc %>% select(beach_nm, postcode, month_date, mon, visitors, lg_hrs, drone_hrs, campaign_idx,
+                                 first_aid_cap, pa_system, flags, equip_rating, mu_mild, mu_cc, mu_sev, mu_all)
+saveRDS(list(forecast = forecast_fy2027, newdata = newdata, final = final, sims = sims), "part1/forecast_fy2027.rds")
+write.csv(forecast_fy2027, "part1/forecast_fy2027.csv", row.names = FALSE)
+```
+
+## 7. Assumptions and limitations
+
+**Assumptions**
+
+- **Visitors** grow at the FY2024 to FY2026 rate (about 1.9% a year), applied to each beach-month's 3-year average. If visitors stay flat instead, every forecast falls by about 4%, since incidents are proportional to visitors through the offset.
+- **Safety inputs stay at FY2026 levels**, beach by beach and month by month. This is the no-extra-funding baseline that Task 2 measures against.
+- **Weather is like the last 10 years.** No trend in swell or temperature, and no events outside the range seen since 2016.
+- **Beach traits and the visitor mix** stay as they are.
+- **The FY2020-21 dip does not repeat** (`period_2021 = 0`).
+- **Model choice:** a separate negative binomial GLM per severity, with visitors as an offset. Beach fixed effects for mild; measured beach traits for close calls and severe (step 05).
+
+**Limitations**
+
+- **Association, not cause.** The safety effects come from where and when resources were placed in the past. Lifeguards and drones were probably put where risk was high, so the model may understate what they achieve. Task 2's "what if" changes inherit this.
+- **Severe incidents are rare** (about 20 a year), so the severe model ranks beaches on their measured traits (rips, rocks, patrols, visitors), not on each beach's own history. Single-beach severe forecasts (mostly below 1 a year) are best read as relative risk, not as counts.
+- **Unexplained FY2020-21 dip.** The data cannot say why it happened (it may be a reporting change or a change in behaviour), so we cannot rule out a repeat.
+- **Theta is fixed in the simulation** and beaches are independent given the weather, so the ranges are, if anything, a little narrow.
+- **No external data** (as the brief requires): no weather outlook, tourism forecasts or planned changes to patrols are used.
+- **Reporting.** If drones or patrols find more minor incidents, recorded mild counts at covered beaches overstate the true counts. This does not affect severe incidents much, since those are hard to miss.

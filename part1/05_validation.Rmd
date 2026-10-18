@@ -1,8 +1,8 @@
 ---
 title: "05 Validation: choose the best model out of sample"
 output: html_document
-editor_options: 
-  markdown: 
+editor_options:
+  markdown:
     wrap: 72
 ---
 
@@ -20,7 +20,7 @@ Score candidate models on data they have not seen, and pick one.
 ## Criteria (and why)
 
 | Metric | Meaning | Role |
-|------------------------|------------------------|------------------------|
+|----|----|----|
 | **Negative log-likelihood (log score)** on test data | how much probability the model gave to what happened; penalises overconfidence | **primary** |
 | Poisson deviance | generalised squared error for counts | secondary |
 | MAE of annual beach totals | average miss in incidents per beach per year; easy to explain | secondary |
@@ -31,56 +31,273 @@ Score candidate models on data they have not seen, and pick one.
 **Why time-based:** the forecast is for the *future*, so we test on the
 future. Random splits leak (same beach, adjacent months).
 
+**One caveat for all scores here:** the test rows use the *actual*
+visitors, weather and safety hours of the test year. In the real
+forecast (step 06) those inputs are assumed, so the real error will be
+larger. Step 06 checks how much larger.
+
 ```{r load}
 panel_f <- readRDS("part1/panel_f.rds")
+
+# "Same as last year" benchmark needs each beach's count 12 months earlier
+panel_f <- panel_f %>% arrange(beach_nm, month_date) %>% group_by(beach_nm) %>%
+  mutate(across(c(n_all, n_mild, n_cc, n_sev), ~ lag(.x, 12), .names = "{.col}_ly")) %>%
+  ungroup()
 ```
 
-## 1. Single split first (YOU)
+## 1. Single split first
 
-Train: months before Sep 2025. Test: Sep 2025 to Aug 2026.
+Train: months before Sep 2025 (FY2017 to FY2025, 8,640 rows). Test: Sep
+2025 to Aug 2026 (FY2026, 960 rows = 80 beaches x 12 months).
 
 ```{r split}
-# TODO (you): train / test data frames
+train <- panel_f %>% filter(month_date <  as.Date("2025-09-01"))
+test  <- panel_f %>% filter(month_date >= as.Date("2025-09-01"))
+c(train = nrow(train), test = nrow(test))
+test %>% summarise(across(c(n_all, n_mild, n_cc, n_sev), sum))   # what actually happened
 ```
 
-## 2. Scoring functions (YOU)
+The test year had 3,690 incidents: 3,371 mild, 293 close calls and 26
+severe. The 26 severe incidents are the most in any year since FY2018,
+so the test year is a hard one for severe incidents.
 
-For negative binomial with mean `mu` and dispersion `theta`:
-`-dnbinom(y, mu = mu, size = theta, log = TRUE)`, summed or averaged
-over test rows.
+## 2. Scoring functions
+
+All four functions take the actual counts `y` and the predicted means
+`mu` for the 960 test rows.
 
 ```{r score}
-# TODO (you): nll_nb <- function(y, mu, theta) ...
-# TODO (you): dev_pois <- function(y, mu) ...   # 2*sum(ifelse(y==0, 0, y*log(y/mu)) - (y-mu))
-# TODO (you): mae_beach_year <- function(...) ...  # aggregate to beach totals first
+# Log score: average negative log-probability the NB gave to each observed count.
+# theta = Inf is the Poisson limit (used for the benchmark, which has no dispersion).
+nll_nb <- function(y, mu, theta) {
+  if (is.infinite(theta)) mean(-dpois(y, mu, log = TRUE))
+  else mean(-dnbinom(y, mu = mu, size = theta, log = TRUE))
+}
+
+# Poisson deviance: 2 * sum of y*log(y/mu) - (y - mu); zero when mu = y everywhere
+dev_pois <- function(y, mu) 2 * sum(ifelse(y == 0, 0, y * log(y / mu)) - (y - mu))
+
+# Add up each beach's 12 months first, then average the absolute miss over the 80 beaches
+mae_beach_year <- function(y, mu, beach) mean(abs(tapply(y, beach, sum) - tapply(mu, beach, sum)))
+
+# Rank beaches by predicted total, take the 10 highest, share of actual incidents they hold
+top10_capture <- function(y, mu, beach) {
+  a <- tapply(y, beach, sum); p <- tapply(mu, beach, sum)
+  sum(a[order(-p)[1:10]]) / sum(a)
+}
+
+score <- function(y, mu, theta, beach) c(
+  nll = nll_nb(y, mu, theta), dev = dev_pois(y, mu), mae = mae_beach_year(y, mu, beach),
+  ratio = sum(mu) / sum(y), top10 = top10_capture(y, mu, beach))
 ```
 
-## 3. Compare candidate models (YOU)
+Why the log score is the main criterion: the forecast hands Task 2 a
+*distribution* of incidents, not just a point. The log score is the only
+metric here that checks the spread as well as the centre. A model that
+is right on average but far too sure of itself gets punished each time
+an unlikely count turns up.
 
-Suggested candidates (add your own): 1. visitors only (offset +
-intercept) 2. + season 3. + conditions 4. + safety 5. + beach traits 6.
-beach fixed effects (`factor(beach_nm)`) instead of traits
+## 3. Compare candidate models
 
-```{r compare}
-# TODO (you): fit each on train with glm.nb, predict(type = "response") on test, fill the table
-results <- data.frame(model = character(), nll = numeric(), dev = numeric(), mae = numeric(), ratio = numeric())
+Each candidate adds one block of predictors to the one before, so the
+table shows what each block buys out of sample. Two variants test the
+open questions from step 04:
+
+-   `v` versions replace `offset(log(visitors))` with `log_visitors` as
+    a normal term, so the data choose the exponent (EDA slope about
+    0.9).
+-   `M6` replaces the five fixed beach traits with one dummy per beach
+    (`factor(beach_nm)`). It learns each beach's own level, including
+    anything about the beach that we have not measured. The visitor mix
+    (`surfer_prop`, `tourist_ratio`) changes month to month, so it
+    stays.
+-   `S_small` is the small severe model from step 04.
+
+```{r specs}
+time   <- c("mon", "period_2021")
+cond   <- c("swell_max_m", "wind_days", "rain_mm", "air_temp_hi", "marine_health")
+safety <- c("log_lg", "log_drone", "campaign_idx", "first_aid_cap", "pa_system", "flags", "equip_rating")
+mix    <- c("surfer_prop", "tourist_ratio")
+traits <- c("rips_per_km", "rocky", "fishing", "rockpool", "shore_len_m")
+
+specs <- list(
+  M1_visitors = list(rhs = "1"),                                   # offset + intercept only
+  M2_season   = list(rhs = time),
+  M3_cond     = list(rhs = c(time, cond)),
+  M4_safety   = list(rhs = c(time, cond, safety)),
+  M5_traits   = list(rhs = c(time, cond, safety, mix, traits)),    # = the step 04 model
+  M5v_slope   = list(rhs = c(time, cond, safety, mix, traits, "log_visitors"), offset = FALSE),
+  M6_beachFE  = list(rhs = c(time, cond, safety, mix, "factor(beach_nm)")),
+  M6v_FEslope = list(rhs = c(time, cond, safety, mix, "factor(beach_nm)", "log_visitors"), offset = FALSE),
+  S_small     = list(rhs = c("log_lg", "log_drone", "campaign_idx", "air_temp_hi", "swell_max_m", "period_2021"))
+)
+
+make_f <- function(y, s) as.formula(paste(
+  y, "~", paste(s$rhs, collapse = " + "),
+  if (isFALSE(s$offset)) "" else "+ offset(log(visitors))"))
+
+# Fit every spec on `train` for response y, score on `test`, plus the "same as last year" benchmark
+run_split <- function(train, test, y) {
+  fits <- lapply(names(specs), function(nm) {
+    m <- tryCatch(suppressWarnings(glm.nb(make_f(y, specs[[nm]]), data = train)),
+                  error = function(e) NULL)
+    if (is.null(m)) return(NULL)
+    mu <- predict(m, test, type = "response")
+    data.frame(model = nm, t(score(test[[y]], mu, m$theta, test$beach_nm)), AIC = AIC(m), BIC = BIC(m))
+  })
+  # benchmark: same beach, same month, last year; floored at 0.1 so a zero last year
+  # does not give probability 0 to any incident this year
+  ly <- pmax(test[[paste0(y, "_ly")]], 0.1)
+  bench <- data.frame(model = "B0_lastyear", t(score(test[[y]], ly, Inf, test$beach_nm)), AIC = NA, BIC = NA)
+  bind_rows(bench, fits)
+}
+
+sev_names <- c(n_mild = "Mild", n_cc = "Close call", n_sev = "Severe", n_all = "All")
+single <- bind_rows(lapply(names(sev_names), function(y) run_split(train, test, y) %>% mutate(y = y)))
 ```
 
-Note: `predict()` for a beach-fixed-effects model needs beaches seen in
-train (they all are here).
-
-## 4. Rolling origin (once the single split works) (YOU)
-
-Repeat with several cut-offs (e.g. test years FY2022, FY2023, FY2024,
-FY2025, each training on everything earlier). Average the log score
-across folds; look at the spread. A model that wins in every fold is
-more trustworthy than one that wins on average.
-
-```{r rolling}
-# TODO (you)
+```{r single_tables, results = "asis"}
+for (y in names(sev_names)) {
+  print(knitr::kable(single %>% filter(.data$y == !!y) %>% select(-y),
+                     digits = 3, caption = paste("FY2026 test year:", sev_names[y])))
+}
 ```
+
+How to read this:
+
+-   **Each block helps, in order.** For every severity the log score
+    falls as season, conditions, safety and traits are added, so none of
+    the blocks from step 03 is dead weight out of sample.
+-   **"Same as last year" loses badly on the log score** (about 3.1 vs
+    1.7 for all incidents). Last year's count is a noisy guess for one
+    beach-month. Its annual-total MAE is reasonable (about 10 incidents
+    per beach) because the noise cancels when 12 months are added. It is
+    useful as a sanity floor, not as a contender.
+-   **Mild (and so all incidents): beach fixed effects win clearly.**
+    Log score 1.670 vs 1.710, and the annual miss per beach halves (6.2
+    vs 12.6). The five measured traits do not capture everything that
+    makes one beach busier with minor incidents than another. Fixed
+    effects pick that up.
+-   **Close calls: fixed effects edge it in this year** (0.513 vs
+    0.521).
+-   **Severe: fixed effects fail.** The log score doubles (0.235 vs
+    0.109). Many beaches had no severe incident in nine years, so the
+    model sets their rate to almost zero. When one then happens, the
+    model had given it a probability close to zero, and the log score
+    explodes. This is overfitting, and exactly what the log score is
+    there to catch: MAE barely notices it (0.258 vs 0.256).
+-   **The `v` versions** (free visitor exponent) are slightly better
+    than the offset versions with traits, and identical with fixed
+    effects. The gain is small (0.003 to 0.012).
+-   **Calibration.** Models with traits overpredict mild incidents by
+    about 10 to 15% in this year. Fixed effects are within 5%. Every
+    model underpredicts severe (ratio about 0.74): 26 happened, about 19
+    were expected. Severe incidents are rare enough that one bad year
+    moves this a lot, which is why we check other years next.
+-   **Top-10 capture for severe.** Our full model puts 46% of severe
+    incidents in its top 10 beaches (random would be 12.5%), so the
+    ranking is informative even though the total is off.
+
+One test year is one draw. Before choosing, check that the winners hold
+up across years.
+
+## 4. Rolling origin
+
+Five folds: test on FY2022, FY2023, FY2024, FY2025 and FY2026, each time
+training on every earlier year (an expanding window). FY2021 is not used
+as a test year, because the `period_2021` flag would then be estimated
+from only one training year.
+
+```{r rolling, results = "asis"}
+roll <- bind_rows(lapply(2022:2026, function(f) bind_rows(lapply(names(sev_names), function(y)
+  run_split(filter(panel_f, fy < f), filter(panel_f, fy == f), y) %>% mutate(fold = f, y = y)))))
+
+roll_summary <- roll %>% group_by(y, model) %>%
+  summarise(nll_mean = mean(nll), nll_sd = sd(nll), mae = mean(mae), ratio = mean(ratio),
+            top10 = mean(top10), .groups = "drop") %>%
+  group_by(y) %>% arrange(nll_mean, .by_group = TRUE) %>% ungroup()
+
+wins <- roll %>% group_by(y, fold) %>% slice_min(nll, n = 1) %>% ungroup() %>% count(y, model, name = "folds_won")
+
+for (y in names(sev_names)) {
+  print(knitr::kable(roll_summary %>% filter(.data$y == !!y) %>% left_join(wins, by = c("y", "model")) %>%
+                       mutate(folds_won = coalesce(folds_won, 0L)) %>% select(-y),
+                     digits = 4, caption = paste("Rolling origin, 5 folds:", sev_names[y])))
+}
+```
+
+`nll_sd` is mostly the difference between years (some years are easier
+to predict than others), so compare models within a fold, as in the plot
+below, rather than reading it as the error of the mean.
+
+```{r rolling_plot, fig.height = 6}
+# Log score in each fold, relative to the full traits model (M5), so year-to-year noise drops out
+roll %>% filter(model %in% c("M4_safety", "M5_traits", "M5v_slope", "M6_beachFE")) %>%
+  group_by(y, fold) %>% mutate(diff = nll - nll[model == "M5_traits"]) %>% ungroup() %>%
+  mutate(y = sev_names[y]) %>%
+  ggplot(aes(fold, diff, colour = model)) + geom_hline(yintercept = 0, colour = "grey60") +
+  geom_line() + geom_point() + facet_wrap(~y, scales = "free_y") +
+  coord_cartesian(ylim = c(-0.06, 0.06)) +
+  labs(x = "test year (FY)", y = "log score minus M5 (below 0 = better than M5)")
+```
+
+The plot cuts off the severe fixed-effects line, which sits far above
+the others in every fold.
+
+What the folds say:
+
+-   **Mild: a beach fixed-effects model wins every fold** (`M6` and
+    `M6v` are tied to four decimals and split the wins; mean log score
+    1.61 vs 1.64 for the best model without them), with calibration
+    close to 1.00 on average. An easy decision.
+-   **Close calls: the full traits model wins on average** (0.537, or
+    0.534 with a free visitor exponent) and fixed effects come only
+    fifth (0.571). Fixed effects won the two most recent folds but lost
+    the first three by more. With about 300 close calls a year spread
+    over 80 beaches, 80 beach dummies are too many to estimate well.
+    This agrees with the earlier analysis notes.
+-   **Severe: the full traits model is the best on average** (0.0878)
+    and its total is right on average (ratio 1.00 over five years). The
+    winner changes from fold to fold (four different models win at least
+    one fold), which is what about 20 events a year looks like. Even the
+    winner is only slightly better than simpler models. Fixed effects
+    fail in every fold.
+-   **Free visitor exponent (`M5v`).** Tied with `M5` for severe and
+    0.003 better for close calls. Too small a gain to give up the simple
+    reading of "incidents per visitor".
 
 ## 5. Decision
 
-Write: which model, which criterion decided it, and how close the
-runner-up was. If close, take the simpler one.
+**One model per severity, each a negative binomial GLM with
+`offset(log(visitors))`:**
+
+| Severity | Model | Decided by | Runner-up |
+|----|----|----|----|
+| Mild | `M6_beachFE`: season, conditions, safety, visitor mix + **one dummy per beach** | log score; a fixed-effects model won all 5 folds | `M6v` tied (so take the simpler offset version), `M5v` 0.03 worse |
+| Close call | `M5_traits`: the step 04 model (season, conditions, safety, visitor mix, beach traits) | mean log score over 5 folds | `M5v` 0.003 better, not worth the extra term, so we take the simpler offset version |
+| Severe | `M5_traits` (same as close calls) | mean log score, calibration 1.00 over 5 folds | `M5v` tied; fixed effects overfit badly |
+
+Why this split makes sense: fixed effects need data. Mild incidents
+happen about 3,300 times a year, enough to learn each beach's own level.
+Close calls and severe incidents are too rare for that, so they borrow
+strength across beaches through the measured traits (rips, rocks,
+fishing, rockpools, length). That is also the more useful model for Task
+2, since it says *why* a beach is risky.
+
+Forecast totals for all incidents are the sum of the three severity
+forecasts.
+
+What to tell the panel:
+
+-   The models were chosen on five years they had not seen, not on how
+    well they fit the past.
+-   For severe incidents the model gets the total right on average, but
+    any single year can be off by about a quarter (FY2026: 26 actual vs
+    about 19 predicted). Report a range, not a point (step 06).
+-   The ranking of risky beaches is more reliable than the count: the
+    top 10 beaches hold about 45% of severe incidents, against 12.5% at
+    random.
+
+```{r save}
+saveRDS(list(mild = specs$M6_beachFE, cc = specs$M5_traits, sev = specs$M5_traits), "part1/chosen_specs.rds")
+```
