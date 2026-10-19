@@ -5,7 +5,9 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
-knitr::opts_knit$set(root.dir = normalizePath(".."))   # run from project root
+root <- rprojroot::find_root(rprojroot::has_dir("part1"))   # project root, wherever this is run from
+knitr::opts_knit$set(root.dir = root)   # knitting: all paths relative to the project root
+if (interactive()) setwd(root)          # running chunks in RStudio or the console: same paths
 library(dplyr); library(tidyr); library(ggplot2); library(lubridate); library(MASS)
 select <- dplyr::select   # MASS masks select()
 ```
@@ -21,8 +23,8 @@ One row per beach per month, with the **count of incidents by severity** next to
 ## 1. Load the data
 
 ```{r load}
-beach <- read.csv("beach_monthly.csv")
-inc   <- read.csv("incidents.csv")
+beach <- read.csv("part1/beach_monthly.csv")
+inc   <- read.csv("part1/incidents.csv")
 dim(beach); dim(inc)
 ```
 
@@ -37,7 +39,7 @@ inc$month_date   <- floor_date(inc$date, "month")
 range(beach$month_date); range(inc$date)
 ```
 
-## 3. Collapse people to incidents 
+## 3. Collapse people to incidents
 
 Hint: give each severity a rank (Mild=1, CloseCall=2, Severe=3), then `group_by(incident_id)` and take the max rank. Keep the beach and month (they are the same for every person in an incident, so `first()` works).
 
@@ -55,7 +57,7 @@ inc1 <- inc %>%
 inc2 <- inc1 %>% group_by(incident_id) %>% slice_max(inc_rank, n = 1, with_ties = FALSE) %>% ungroup()
 ```
 
-## 4. Count by beach-month and severity 
+## 4. Count by beach-month and severity
 
 Hint: `count(beach_nm, month_date, worst)` then `pivot_wider(..., values_fill = 0)`. Beach-months with **no** incidents will be missing after the count, so you must join onto the full panel and fill the gaps with 0.
 
@@ -68,7 +70,7 @@ counts <- inc2 %>% count(beach_nm, month_date, inc_type, sort = TRUE) %>% pivot_
 )
 ```
 
-## 5. Join onto the panel (YOU)
+## 5. Join onto the panel
 
 ```{r join}
 # panel <- left_join(beach, counts, by = ...) and replace NA counts with 0.

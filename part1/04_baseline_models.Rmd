@@ -5,7 +5,9 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
-knitr::opts_knit$set(root.dir = normalizePath(".."))   # run from project root
+root <- rprojroot::find_root(rprojroot::has_dir("part1"))   # project root, wherever this is run from
+knitr::opts_knit$set(root.dir = root)   # knitting: all paths relative to the project root
+if (interactive()) setwd(root)          # running chunks in RStudio or the console: same paths
 library(dplyr); library(tidyr); library(ggplot2); library(lubridate); library(MASS)
 select <- dplyr::select   # MASS masks select()
 ```

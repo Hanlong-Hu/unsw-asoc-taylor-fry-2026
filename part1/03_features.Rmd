@@ -5,7 +5,9 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
-knitr::opts_knit$set(root.dir = normalizePath(".."))   # run from project root
+root <- rprojroot::find_root(rprojroot::has_dir("part1"))   # project root, wherever this is run from
+knitr::opts_knit$set(root.dir = root)   # knitting: all paths relative to the project root
+if (interactive()) setwd(root)          # running chunks in RStudio or the console: same paths
 library(dplyr); library(tidyr); library(ggplot2); library(lubridate); library(MASS)
 select <- dplyr::select   # MASS masks select()
 ```
@@ -21,7 +23,7 @@ panel <- readRDS("part1/panel.rds")
 ## Candidate features
 
 | Group | Variables | Why it might matter | Watch out |
-|------------------|------------------|------------------|------------------|
+|----|----|----|----|
 | Exposure | `visitors` | more people, more incidents | enters as an **offset** in step 04 |
 | Season | month (or summer/winter) | beach use and conditions vary by season | month and `lg_hrs` are confounded (patrols are seasonal) |
 | Conditions | `swell_max_m`, `wind_days`, `rain_mm`, `air_temp_hi`, `water_temp`, `turbidity`, `marine_health` | hazard level | `swell_avg_m` \~ `swell_max_m` (r=0.96); air vs water temp r=0.79: keep one of each |
@@ -92,7 +94,7 @@ table(panel_f$period_2021)
 ## 3. Decision log
 
 | Feature | Kept? | Reason |
-|------------------------|------------------------|------------------------|
+|----|----|----|
 | `log_visitors` / `visitors` | yes | exposure; offset or normal term decided in step 05 |
 | `mon` (month factor) | yes | seasonality; confounded with patrol hours |
 | `period_2021` | yes | the 2020-21 drop in the EDA; unexplained |
