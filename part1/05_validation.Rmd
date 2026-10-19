@@ -8,7 +8,9 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
-knitr::opts_knit$set(root.dir = normalizePath(".."))   # run from project root
+root <- rprojroot::find_root(rprojroot::has_dir("part1"))   # project root, wherever this is run from
+knitr::opts_knit$set(root.dir = root)   # knitting: all paths relative to the project root
+if (interactive()) setwd(root)          # running chunks in RStudio or the console: same paths
 library(dplyr); library(tidyr); library(ggplot2); library(lubridate); library(MASS)
 select <- dplyr::select   # MASS masks select()
 ```
@@ -266,7 +268,142 @@ What the folds say:
     0.003 better for close calls. Too small a gain to give up the simple
     reading of "incidents per visitor".
 
-## 5. Decision
+## 5. Challenger: XGBoost
+
+Does a flexible machine-learning model find something the GLMs miss? We
+run gradient-boosted trees (XGBoost) through the same five folds and
+score them against the model chosen for each severity.
+
+**How it works here.**
+
+1.  **Start from visitors.** Each beach-month starts at log(visitors),
+    passed as `base_margin`. This is the offset again: the trees learn
+    incidents per visitor, not raw counts.
+2.  **Add small trees.** Each tree asks a few yes/no questions (e.g.
+    "swell above 2.3 m and lifeguard hours below 400?") and each end
+    point (leaf) adds a number to the log rate. The prediction is
+    visitors x exp(sum of all trees), so on the same log scale as the
+    GLM.
+3.  **Each tree fixes the current errors.** With the Poisson objective a
+    leaf's value is roughly the log of actual / predicted for the rows
+    it holds, shrunk towards zero when they have few incidents, then
+    scaled by the learning rate (0.03).
+4.  **Interactions come free.** Trees 2 to 4 levels deep combine 2 to 4
+    inputs, so effects like "swell matters more at rocky beaches" are
+    found without writing them in. The GLM only has them if we add
+    them.
+5.  **Stop before overfitting.** Inside each training window the last
+    year is held out to choose tree depth, minimum leaf size and the
+    number of trees (early stopping), then the model is refitted on the
+    whole window. The test year is never seen.
+6.  **Add a spread.** XGBoost only gives a mean. For the log score we fit
+    a negative binomial `theta` to the held-out year's predictions;
+    where that estimate is unbounded we use Poisson.
+
+Inputs are the same as the traits model, with month and marine health
+as numbers and lifeguard and drone hours unlogged (trees do not care
+about monotone transforms).
+
+```{r xgb_roll}
+library(xgboost)
+set.seed(1)
+
+xfeats <- c("mon_i", "period_2021", "swell_max_m", "wind_days", "rain_mm", "air_temp_hi", "mh_i",
+            "lg_hrs", "drone_hrs", "campaign_idx", "first_aid_cap", "pa_system", "flags", "equip_rating",
+            "surfer_prop", "tourist_ratio", "rips_per_km", "rocky", "fishing", "rockpool", "shore_len_m")
+panel_f <- panel_f %>% mutate(mon_i = as.integer(as.character(mon)), mh_i = as.integer(marine_health))
+dmat <- function(d, y) xgb.DMatrix(as.matrix(d[xfeats]), label = d[[y]], base_margin = log(d$visitors))
+
+xgrid <- expand.grid(max_depth = c(2, 3, 4), min_child_weight = c(1, 10))
+
+# Tune on the last training year, refit on all training years
+fit_xgb <- function(train, y) {
+  last <- max(train$fy)
+  d_in <- dmat(filter(train, fy < last), y); val <- filter(train, fy == last); d_val <- dmat(val, y)
+  res <- lapply(seq_len(nrow(xgrid)), function(i) {
+    p <- list(objective = "count:poisson", eta = 0.03, max_depth = xgrid$max_depth[i],
+              min_child_weight = xgrid$min_child_weight[i], subsample = 0.8, colsample_bytree = 0.8,
+              eval_metric = "poisson-nloglik")
+    m <- xgb.train(p, d_in, nrounds = 3000, evals = list(val = d_val), early_stopping_rounds = 100, verbose = 0)
+    list(p = p, n = xgb.attr(m, "best_iteration") + 1, m = m,
+         score = min(attributes(m)$evaluation_log$val_poisson_nloglik))
+  })
+  best  <- res[[which.min(sapply(res, `[[`, "score"))]]
+  mu_v  <- predict(best$m, d_val, iterationrange = c(1, best$n))
+  theta <- tryCatch(as.numeric(theta.ml(val[[y]], mu_v, limit = 100)), error = function(e) Inf)
+  list(m = xgb.train(best$p, dmat(train, y), nrounds = best$n, verbose = 0), theta = theta)
+}
+
+chosen <- c(n_mild = "M6_beachFE", n_cc = "M5_traits", n_sev = "M5_traits")   # the GLMs picked in section 4
+xgb_roll <- bind_rows(lapply(2022:2026, function(f) bind_rows(lapply(names(chosen), function(y) {
+  train <- filter(panel_f, fy < f); test <- filter(panel_f, fy == f)
+  x <- fit_xgb(train, y)
+  data.frame(model = "XGB", t(score(test[[y]], predict(x$m, dmat(test, y)), x$theta, test$beach_nm)),
+             fold = f, y = y)
+}))))
+
+vs <- bind_rows(roll %>% filter(model == chosen[y]) %>% mutate(model = "GLM") %>% select(names(xgb_roll)),
+                xgb_roll)
+xgb_wins <- vs %>% group_by(y, fold) %>% summarise(xgb_win = nll[model == "XGB"] < nll[model == "GLM"], .groups = "drop") %>%
+  group_by(y) %>% summarise(xgb_folds_won = sum(xgb_win))
+knitr::kable(vs %>% group_by(y = sev_names[y], model) %>%
+               summarise(nll = mean(nll), mae = mean(mae), ratio = mean(ratio), top10 = mean(top10), .groups = "drop") %>%
+               left_join(xgb_wins %>% mutate(y = sev_names[y]), by = "y") %>%
+               mutate(xgb_folds_won = ifelse(model == "XGB", xgb_folds_won, 5L - xgb_folds_won)) %>%
+               rename(folds_won = xgb_folds_won),
+             digits = 4, caption = "Rolling origin, 5 folds: chosen GLM vs XGBoost")
+```
+
+What it says:
+
+-   **Mild: close to a tie.** XGBoost is marginally ahead (1.605 vs
+    1.612, 4 folds to 1, annual miss 7.0 for both), a fifth of the gap
+    that fixed effects opened over traits in section 4. The beach fixed
+    effects already hold most of what the trees find.
+-   **Close calls: XGBoost wins every fold** (0.515 vs 0.537) and cuts
+    the annual miss per beach by about 18% (1.53 vs 1.88). The gain is
+    seven times the gap that separated `M5` and `M5v` in section 4, so
+    the close-call GLM is missing real structure, most likely
+    interactions or curved effects. It also overpredicts less (1.08 vs
+    1.14).
+-   **Severe: no clear winner.** XGBoost's log score is slightly lower
+    (0.0854 vs 0.0878, 3 folds of 5, which is chance with about 20
+    events a year), but it overpredicts the total by 12% on average
+    while the GLM is right (1.12 vs 1.00), and its annual miss per beach
+    is larger.
+-   This is not tilted towards XGBoost: the GLMs were chosen on these
+    same five folds, XGBoost was tuned only inside each training window.
+
+**What it does to the Task 2 lever.** Fit both severe models on all
+data, take FY2026's inputs, and scale lifeguard hours at every
+beach-month:
+
+```{r xgb_lever}
+fy26  <- filter(panel_f, fy == 2026)
+g_sev <- glm.nb(make_f("n_sev", specs$M5_traits), data = panel_f)
+x_sev <- fit_xgb(panel_f, "n_sev")
+lever <- t(sapply(c(0.5, 0.75, 1, 1.5, 2, 3), function(s) {
+  nd <- fy26 %>% mutate(lg_hrs = lg_hrs * s, log_lg = log1p(lg_hrs))
+  c(lg_hrs_x = s, GLM = sum(predict(g_sev, nd, type = "response")), XGB = sum(predict(x_sev$m, dmat(nd, "n_sev"))))
+}))
+knitr::kable(lever, digits = c(2, 1, 1), caption = "Expected severe incidents, FY2026 inputs, lifeguard hours scaled")
+```
+
+The GLM gives one smooth effect with a standard error. XGBoost says
+cutting patrols hurts more (25.6 vs 22.0 at half the hours) and adding
+them helps about as much up to double, then flattens: a tree cannot
+extrapolate past the most hours a beach has had, so a large funding
+increase would show little extra benefit. Neither is causal (step 06,
+section 7).
+
+**Verdict.** Keep the GLMs. For severe, the GLM's total is right on
+average, its range can be simulated from `coef` and `vcov` (step 06),
+and its effects are what Task 2 needs; XGBoost's edge is within noise.
+For close calls, the XGBoost win is a signal, not a replacement: the
+next step is to find what it picked up (e.g. SHAP interaction values)
+and add those terms to the close-call GLM.
+
+## 6. Decision
 
 **One model per severity, each a negative binomial GLM with
 `offset(log(visitors))`:**
