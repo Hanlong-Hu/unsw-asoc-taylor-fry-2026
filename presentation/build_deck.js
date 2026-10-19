@@ -9,40 +9,63 @@ const { applyTheme } = require(process.env.PPTX_SKILL + "/scripts/apply_theme.js
 
 const OUT = process.env.OUT || path.join(__dirname, "deck_design.pptx");
 
-// Palette: deep ocean blue (primary), sandy yellow (secondary), white.
+// Palette taken from a bright geometric mural: vivid blue (primary), sunny yellow (secondary),
+// with red, pink and green as supporting colours and near-black ink for text.
 const HEX = {
-  ocean: "0A3D62",     // primary: backgrounds of dark slides, titles, big numbers
-  deep: "072B45",      // darker ocean: text on light slides
-  sea: "2E7DA6",       // lighter ocean: second chart series, links
-  mist: "EAF1F6",      // very pale ocean: cards and panels on white slides
-  sand: "E9C46A",      // secondary: badges, pills, highlight series
-  sandDeep: "B8902E",  // darker sand: highlight text that must read on white
-  sandPale: "FBF3DC",  // pale sand: "so what" boxes
-  grey: "5B6B7A",      // captions, footers
+  blue: "0F79D5",      // primary: dark-slide backgrounds, titles, big numbers, main chart series
+  ink: "16151F",       // body text, and text on yellow
+  red: "E0251B",       // second chart series
+  pink: "E2558F",      // third series, step arrows
+  green: "2E8B1E",     // fourth series
+  orange: "E8590F",    // used in the mural blocks only
+  palePinkBlock: "F2B6E3", // used in the mural blocks only
+  paleBlue: "E7F1FB",  // cards and panels on white slides
+  yellow: "F4B223",    // secondary: badges, pills, highlight series
+  palePink: "FCE9F2",  // "so what" boxes
+  grey: "5B6B7A",      // captions, footers, "other" series
   white: "FFFFFF",
 };
 
 const THEME = {
-  name: "Ocean and Sand",
+  name: "Mural",
   headFontFace: "Cambria",
   bodyFontFace: "Calibri",
   colors: {
-    dk1: HEX.deep, lt1: HEX.white, dk2: HEX.ocean, lt2: HEX.mist,
-    accent1: HEX.ocean, accent2: HEX.sand, accent3: HEX.sea,
-    accent4: HEX.sandDeep, accent5: "8FB8D3", accent6: HEX.grey,
-    hlink: HEX.sea, folHlink: HEX.grey,
+    dk1: HEX.ink, lt1: HEX.white, dk2: HEX.blue, lt2: HEX.paleBlue,
+    accent1: HEX.blue, accent2: HEX.yellow, accent3: HEX.red,
+    accent4: HEX.pink, accent5: HEX.green, accent6: HEX.grey,
+    hlink: HEX.blue, folHlink: HEX.pink,
   },
 };
 
 const W = 13.333, H = 7.5, M = 0.6; // LAYOUT_WIDE, outer margin
 
-// Waves along the bottom of the dark slides: the deck's one decorative motif.
-async function wavePng() {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="2667" height="400" viewBox="0 0 2667 400">
-    <path d="M0 170 C 300 90, 600 250, 950 170 S 1600 90, 1950 175 S 2450 250, 2667 160 L2667 400 L0 400 Z" fill="#${HEX.sea}" fill-opacity="0.35"/>
-    <path d="M0 250 C 350 180, 700 320, 1100 245 S 1800 170, 2200 250 S 2550 300, 2667 240 L2667 400 L0 400 Z" fill="#${HEX.deep}"/>
-    <path d="M0 250 C 350 180, 700 320, 1100 245 S 1800 170, 2200 250 S 2550 300, 2667 240" fill="none" stroke="#${HEX.sand}" stroke-width="6"/>
-  </svg>`;
+// Overlapping colour blocks, after the mural: the deck's one decorative motif.
+// band = strip along the bottom of dark slides; column = tall panel on the right of the title slide.
+const BLOCKS = {
+  band: { w: 2667, h: 300, polys: [
+    ["pink", "0,110 760,30 940,300 0,300"],
+    ["yellow", "560,300 700,80 1560,150 1700,300"],
+    ["green", "1080,300 1180,170 1880,215 1930,300"],
+    ["red", "1450,300 1600,20 2667,95 2667,300"],
+    ["ink", "1900,300 1965,215 2060,228 2090,300"],
+    ["palePinkBlock", "2080,300 2230,165 2667,195 2667,300"],
+    ["orange", "0,300 0,200 330,170 420,300"],
+  ] },
+  column: { w: 806, h: 1500, polys: [
+    ["red", "260,0 806,0 806,620 120,520"],
+    ["pink", "0,0 300,0 180,560 0,620"],
+    ["yellow", "60,500 806,560 806,1010 0,960"],
+    ["green", "330,260 806,300 806,640 260,600"],
+    ["palePinkBlock", "0,930 806,980 806,1500 160,1500"],
+    ["orange", "0,1180 200,1150 330,1500 0,1500"],
+    ["ink", "560,960 640,950 690,1110 600,1120"],
+  ] },
+};
+async function blocksPng(kind) {
+  const { w, h, polys } = BLOCKS[kind];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
+    polys.map(([c, pts]) => `<polygon points="${pts}" fill="#${HEX[c]}"/>`).join("") + "</svg>";
   const buf = await sharp(Buffer.from(svg)).png().toBuffer();
   return "image/png;base64," + buf.toString("base64");
 }
@@ -54,7 +77,7 @@ async function build() {
   pres.subject = "UNSW ASOC x Taylor Fry Case Competition 2026";
   pres.theme = { headFontFace: THEME.headFontFace, bodyFontFace: THEME.bodyFontFace };
   const C = pres.SchemeColor;
-  const WAVE = await wavePng();
+  const BAND = await blocksPng("band"), COLUMN = await blocksPng("column");
   // Layouts only accept rect/text/image/line objects, so cards and badges are empty shaped text boxes.
   const shape = (type, opts) => ({ text: { text: "", options: { shape: pres.ShapeType[type], line: { type: "none" }, ...opts } } });
 
@@ -62,13 +85,14 @@ async function build() {
     { text: { text: "UNSW ASOC x Taylor Fry Case Competition 2026", options: {
       x: M, y: H - 0.5, w: 6, h: 0.3, fontSize: 10, color: dark ? C.background1 : C.accent6, margin: 0 } } },
   ]);
-  const slideNumber = (dark) => ({ x: W - M - 0.6, y: H - 0.5, w: 0.6, h: 0.3, fontSize: 10,
-    color: dark ? HEX.sand : HEX.grey, align: "right" });
+  // Dark slides carry the colour band along the bottom, so their number sits top right instead.
+  const slideNumber = (dark) => ({ x: W - M - 0.6, y: dark ? 0.4 : H - 0.5, w: 0.6, h: 0.3, fontSize: 10,
+    color: dark ? HEX.white : HEX.grey, align: "right" });
 
   // Title, kicker pill and footer shared by every light content layout.
   const kickerPill = (fill) => shape("roundRect", { x: M, y: 0.45, w: 2.6, h: 0.36, rectRadius: 0.18, fill: { color: fill } });
   const kicker = (prompt) => ({ placeholder: { options: { name: "kicker", type: "body", x: M, y: 0.45, w: 2.6, h: 0.36,
-    fontSize: 11, bold: true, color: C.text2, align: "center", valign: "middle", charSpacing: 1.5, margin: 0 }, text: prompt } });
+    fontSize: 11, bold: true, color: C.text1, align: "center", valign: "middle", charSpacing: 1.5, margin: 0 }, text: prompt } });
   const title = (size = 32) => ({ placeholder: { options: { align: "left", name: "title", type: "title", x: M, y: 0.95, w: W - 2 * M, h: 0.9,
     fontSize: size, bold: true, color: C.text2, valign: "top", margin: 0 }, text: "Action title: the one message of this slide" } });
   const lightBase = (pillFill, kickerPrompt, titleSize) => [kickerPill(pillFill), kicker(kickerPrompt), title(titleSize), ...footer(false)];
@@ -76,34 +100,33 @@ async function build() {
 
   // ---------- Layouts ----------
   pres.defineSlideMaster({
-    title: "Title (dark)", background: { color: HEX.ocean }, objects: [
-      { image: { x: 0, y: H - 1.5, w: W, h: 1.5, data: WAVE } },
-      { placeholder: { options: { align: "left", name: "title", type: "title", x: M + 0.2, y: 1.7, w: 9.5, h: 1.8, fontSize: 44, bold: true,
+    title: "Title (dark)", background: { color: HEX.blue }, objects: [
+      { image: { x: W - 4.03, y: 0, w: 4.03, h: H, data: COLUMN } },
+      { placeholder: { options: { align: "left", name: "title", type: "title", x: M + 0.2, y: 1.7, w: 7.9, h: 1.8, fontSize: 44, bold: true,
         color: C.background1, valign: "bottom", margin: 0 }, text: "Presentation title" } },
-      { placeholder: { options: { align: "left", name: "subtitle", type: "body", x: M + 0.2, y: 3.65, w: 9.5, h: 0.6, fontSize: 20,
-        color: C.accent2, margin: 0 }, text: "Subtitle: the recommendation in one line" } },
-      { placeholder: { options: { align: "left", name: "meta", type: "body", x: M + 0.2, y: 4.6, w: 9.5, h: 0.8, fontSize: 14,
+      { placeholder: { options: { align: "left", name: "subtitle", type: "body", x: M + 0.2, y: 3.65, w: 7.9, h: 0.6, fontSize: 20,
+        color: C.background1, margin: 0 }, text: "Subtitle: the recommendation in one line" } },
+      { placeholder: { options: { align: "left", name: "meta", type: "body", x: M + 0.2, y: 4.6, w: 7.9, h: 0.8, fontSize: 14,
         color: C.background1, margin: 0 }, text: "Team name · member names · date" } },
     ],
   });
 
   pres.defineSlideMaster({
-    title: "Section divider (dark)", background: { color: HEX.ocean }, objects: [
-      { image: { x: 0, y: H - 1.5, w: W, h: 1.5, data: WAVE } },
-      shape("ellipse", { x: M + 0.2, y: 2.35, w: 1.3, h: 1.3, fill: { color: HEX.sand } }),
+    title: "Section divider (dark)", background: { color: HEX.blue }, objects: [
+      { image: { x: 0, y: H - 1.5, w: W, h: 1.5, data: BAND } },
+      shape("ellipse", { x: M + 0.2, y: 2.35, w: 1.3, h: 1.3, fill: { color: HEX.yellow } }),
       { placeholder: { options: { name: "number", type: "body", x: M + 0.2, y: 2.35, w: 1.3, h: 1.3, fontSize: 40, bold: true,
-        fontFace: THEME.headFontFace, color: C.text2, align: "center", valign: "middle", margin: 0 }, text: "1" } },
+        fontFace: THEME.headFontFace, color: C.text1, align: "center", valign: "middle", margin: 0 }, text: "1" } },
       { placeholder: { options: { align: "left", name: "title", type: "title", x: M + 1.9, y: 2.25, w: 9, h: 0.95, fontSize: 40, bold: true,
         color: C.background1, valign: "bottom", margin: 0 }, text: "Section title" } },
       { placeholder: { options: { align: "left", name: "subtitle", type: "body", x: M + 1.9, y: 3.25, w: 9, h: 0.55, fontSize: 18,
-        color: C.accent2, margin: 0 }, text: "The question this section answers" } },
-      ...footer(true),
+        color: C.background1, margin: 0 }, text: "The question this section answers" } },
     ], slideNumber: slideNumber(true),
   });
 
   pres.defineSlideMaster({
     title: "Title only", background: { color: HEX.white }, objects: [
-      ...lightBase(HEX.sand, "SECTION", 32),
+      ...lightBase(HEX.yellow, "SECTION", 32),
       { placeholder: { options: { align: "left", name: "body", type: "body", x: M, y: TOP, w: W - 2 * M, h: BOTTOM - TOP, fontSize: 16,
         color: C.text1, valign: "top" }, text: "Free canvas: build cards, diagrams or tables here" } },
     ], slideNumber: slideNumber(false),
@@ -113,12 +136,12 @@ async function build() {
   const panelX = 8.85, panelW = W - M - panelX;
   pres.defineSlideMaster({
     title: "Chart + takeaway", background: { color: HEX.white }, objects: [
-      ...lightBase(HEX.sand, "SECTION", 32),
+      ...lightBase(HEX.yellow, "SECTION", 32),
       { placeholder: { options: { align: "left", name: "chart", type: "pic", x: M, y: TOP, w: panelX - M - 0.35, h: BOTTOM - TOP - 0.4,
         color: C.text1 }, text: "Insert chart (paste or picture)" } },
       { placeholder: { options: { align: "left", name: "source", type: "body", x: M, y: BOTTOM - 0.3, w: panelX - M - 0.35, h: 0.3, fontSize: 10,
         italic: true, color: C.accent6, margin: 0 }, text: "Source / note" } },
-      shape("roundRect", { x: panelX, y: TOP, w: panelW, h: BOTTOM - TOP, rectRadius: 0.12, fill: { color: HEX.mist } }),
+      shape("roundRect", { x: panelX, y: TOP, w: panelW, h: BOTTOM - TOP, rectRadius: 0.12, fill: { color: HEX.paleBlue } }),
       { placeholder: { options: { align: "left", name: "takeaway_head", type: "body", x: panelX + 0.3, y: TOP + 0.3, w: panelW - 0.6, h: 0.9,
         fontSize: 20, bold: true, fontFace: THEME.headFontFace, color: C.text2, valign: "top", margin: 0 }, text: "Key takeaway" } },
       { placeholder: { options: { align: "left", name: "takeaway", type: "body", x: panelX + 0.3, y: TOP + 1.35, w: panelW - 0.6, h: BOTTOM - TOP - 1.65,
@@ -132,7 +155,7 @@ async function build() {
   for (let i = 0; i < 3; i++) {
     const x = M + i * (cardW + 0.35);
     statObjs.push(
-      shape("roundRect", { x, y: TOP, w: cardW, h: cardH, rectRadius: 0.12, fill: { color: HEX.mist } }),
+      shape("roundRect", { x, y: TOP, w: cardW, h: cardH, rectRadius: 0.12, fill: { color: HEX.paleBlue } }),
       { placeholder: { options: { align: "left", name: `stat${i + 1}`, type: "body", x: x + 0.3, y: TOP + 0.3, w: cardW - 0.6, h: 1.2, fontSize: 54, bold: true,
         fontFace: THEME.headFontFace, color: C.text2, valign: "bottom", margin: 0 }, text: "00" } },
       { placeholder: { options: { align: "left", name: `label${i + 1}`, type: "body", x: x + 0.3, y: TOP + 1.6, w: cardW - 0.6, h: 0.95, fontSize: 15,
@@ -142,8 +165,8 @@ async function build() {
   const soY = TOP + cardH + 0.35;
   pres.defineSlideMaster({
     title: "Three stats", background: { color: HEX.white }, objects: [
-      ...lightBase(HEX.sand, "SECTION", 32), ...statObjs,
-      shape("roundRect", { x: M, y: soY, w: W - 2 * M, h: BOTTOM - soY, rectRadius: 0.12, fill: { color: HEX.sandPale } }),
+      ...lightBase(HEX.yellow, "SECTION", 32), ...statObjs,
+      shape("roundRect", { x: M, y: soY, w: W - 2 * M, h: BOTTOM - soY, rectRadius: 0.12, fill: { color: HEX.palePink } }),
       { placeholder: { options: { align: "left", name: "sowhat", type: "body", x: M + 0.3, y: soY + 0.15, w: W - 2 * M - 0.6, h: BOTTOM - soY - 0.3,
         fontSize: 16, color: C.text1, valign: "middle", margin: 0 }, text: "So what: what this means for the government" } },
     ], slideNumber: slideNumber(false),
@@ -155,8 +178,8 @@ async function build() {
   [0, 1].forEach((i) => {
     const x = M + i * (colW + 0.4);
     colObjs.push(
-      shape("roundRect", { x, y: TOP, w: colW, h: BOTTOM - TOP, rectRadius: 0.12, fill: { color: HEX.mist } }),
-      shape("ellipse", { x: x + 0.3, y: TOP + 0.3, w: 0.5, h: 0.5, fill: { color: HEX.sand } }),
+      shape("roundRect", { x, y: TOP, w: colW, h: BOTTOM - TOP, rectRadius: 0.12, fill: { color: HEX.paleBlue } }),
+      shape("ellipse", { x: x + 0.3, y: TOP + 0.3, w: 0.5, h: 0.5, fill: { color: HEX.yellow } }),
       { placeholder: { options: { align: "left", name: `col${i + 1}_head`, type: "body", x: x + 0.95, y: TOP + 0.3, w: colW - 1.25, h: 0.5, fontSize: 20, bold: true,
         fontFace: THEME.headFontFace, color: C.text2, valign: "middle", margin: 0 }, text: "Column heading" } },
       { placeholder: { options: { align: "left", name: `col${i + 1}`, type: "body", x: x + 0.3, y: TOP + 1.05, w: colW - 0.6, h: BOTTOM - TOP - 1.35,
@@ -164,7 +187,7 @@ async function build() {
     );
   });
   pres.defineSlideMaster({
-    title: "Two columns", background: { color: HEX.white }, objects: [...lightBase(HEX.sand, "SECTION", 32), ...colObjs],
+    title: "Two columns", background: { color: HEX.white }, objects: [...lightBase(HEX.yellow, "SECTION", 32), ...colObjs],
     slideNumber: slideNumber(false),
   });
 
@@ -174,10 +197,10 @@ async function build() {
   for (let i = 0; i < 4; i++) {
     const x = M + i * (stepW + 0.35);
     stepObjs.push(
-      shape("roundRect", { x, y: TOP + 0.45, w: stepW, h: BOTTOM - TOP - 0.45, rectRadius: 0.12, fill: { color: HEX.mist } }),
-      shape("ellipse", { x: x + stepW / 2 - 0.45, y: TOP, w: 0.9, h: 0.9, fill: { color: HEX.sand }, line: { color: HEX.white, width: 3 } }),
+      shape("roundRect", { x, y: TOP + 0.45, w: stepW, h: BOTTOM - TOP - 0.45, rectRadius: 0.12, fill: { color: HEX.paleBlue } }),
+      shape("ellipse", { x: x + stepW / 2 - 0.45, y: TOP, w: 0.9, h: 0.9, fill: { color: HEX.yellow }, line: { color: HEX.white, width: 3 } }),
       { text: { text: String(i + 1), options: { x: x + stepW / 2 - 0.45, y: TOP, w: 0.9, h: 0.9, fontSize: 26, bold: true,
-        fontFace: THEME.headFontFace, color: C.text2, align: "center", valign: "middle", margin: 0 } } },
+        fontFace: THEME.headFontFace, color: C.text1, align: "center", valign: "middle", margin: 0 } } },
       { placeholder: { options: { align: "left", name: `step${i + 1}_head`, type: "body", x: x + 0.25, y: TOP + 1.1, w: stepW - 0.5, h: 0.8, fontSize: 18, bold: true,
         fontFace: THEME.headFontFace, color: C.text2, align: "center", valign: "top", margin: 0 }, text: "Step heading" } },
       { placeholder: { options: { align: "left", name: `step${i + 1}`, type: "body", x: x + 0.25, y: TOP + 2.0, w: stepW - 0.5, h: BOTTOM - TOP - 2.3,
@@ -187,13 +210,13 @@ async function build() {
       bold: true, color: C.accent4, align: "center", valign: "middle", margin: 0 } } });
   }
   pres.defineSlideMaster({
-    title: "Four steps", background: { color: HEX.white }, objects: [...lightBase(HEX.sand, "SECTION", 32), ...stepObjs],
+    title: "Four steps", background: { color: HEX.white }, objects: [...lightBase(HEX.yellow, "SECTION", 32), ...stepObjs],
     slideNumber: slideNumber(false),
   });
 
   pres.defineSlideMaster({
     title: "Table", background: { color: HEX.white }, objects: [
-      ...lightBase(HEX.sand, "SECTION", 32),
+      ...lightBase(HEX.yellow, "SECTION", 32),
       { placeholder: { options: { align: "left", name: "table", type: "tbl", x: M, y: TOP, w: W - 2 * M, h: BOTTOM - TOP - 0.45, color: C.text1 },
         text: "Insert table" } },
       { placeholder: { options: { align: "left", name: "source", type: "body", x: M, y: BOTTOM - 0.3, w: W - 2 * M, h: 0.3, fontSize: 10,
@@ -202,21 +225,21 @@ async function build() {
   });
 
   pres.defineSlideMaster({
-    title: "Closing (dark)", background: { color: HEX.ocean }, objects: [
-      { image: { x: 0, y: H - 1.5, w: W, h: 1.5, data: WAVE } },
+    title: "Closing (dark)", background: { color: HEX.blue }, objects: [
+      { image: { x: 0, y: H - 1.5, w: W, h: 1.5, data: BAND } },
       { placeholder: { options: { align: "left", name: "title", type: "title", x: M + 0.2, y: 0.9, w: W - 2 * M - 0.4, h: 1.0, fontSize: 40, bold: true,
         color: C.background1, valign: "bottom", margin: 0 }, text: "Closing message" } },
       { placeholder: { options: { align: "left", name: "body", type: "body", x: M + 0.2, y: 2.25, w: 8.2, h: 3.4, fontSize: 18,
         color: C.background1, valign: "top", margin: 0, paraSpaceAfter: 10 }, text: "Three recommendations to remember" } },
-      shape("roundRect", { x: 9.3, y: 2.25, w: W - M - 9.5, h: 2.4, rectRadius: 0.12, fill: { color: HEX.sand } }),
+      shape("roundRect", { x: 9.3, y: 2.25, w: W - M - 9.5, h: 2.4, rectRadius: 0.12, fill: { color: HEX.yellow } }),
       { placeholder: { options: { align: "left", name: "ask", type: "body", x: 9.55, y: 2.45, w: W - M - 10.0, h: 2.0, fontSize: 18, bold: true,
-        fontFace: THEME.headFontFace, color: C.text2, valign: "middle", margin: 0 }, text: "The decision we are asking for" } },
+        fontFace: THEME.headFontFace, color: C.text1, valign: "middle", margin: 0 }, text: "The decision we are asking for" } },
     ], slideNumber: slideNumber(true),
   });
 
   pres.defineSlideMaster({
     title: "Appendix", background: { color: HEX.white }, objects: [
-      ...lightBase(HEX.mist, "APPENDIX", 28),
+      ...lightBase(HEX.paleBlue, "APPENDIX", 28),
       { placeholder: { options: { align: "left", name: "body", type: "body", x: M, y: TOP, w: W - 2 * M, h: BOTTOM - TOP, fontSize: 14,
         color: C.text1, valign: "top" }, text: "Technical detail for Q&A" } },
     ], slideNumber: slideNumber(false),
