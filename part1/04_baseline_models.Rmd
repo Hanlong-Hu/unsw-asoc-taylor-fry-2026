@@ -29,6 +29,8 @@ train <- panel_f %>% filter(month_date < as.Date("2025-09-01"))   # hold out Sep
 
 ## 1. Poisson baseline for n_all
 
+> **In plain terms:** fit a first model that explains incidents per visitor from season, weather, safety measures and beach features.
+
 Write the predictor list once and reuse it for every model, so the models differ only in the response.
 
 ```{r pois}
@@ -47,6 +49,8 @@ summary(m_pois)
 
 ## 2. Overdispersion check
 
+> **In plain terms:** check whether that first model is too sure of itself. It is: real counts vary about twice as much as it assumes.
+
 A quick rule: residual deviance / residual df much greater than 1 means overdispersion.
 
 ```{r disp}
@@ -59,6 +63,8 @@ If these are well above 1, the Poisson standard errors are too small (it is over
 
 ## 3. Negative binomial
 
+> **In plain terms:** switch to a model that allows for the extra variation (negative binomial). It fits much better.
+
 ```{r nb}
 m_nb <- glm.nb(make_formula("n_all"), data = train)
 summary(m_nb)
@@ -69,6 +75,8 @@ AIC(m_pois, m_nb)   # lower is better; a big drop confirms negative binomial
 Note that `glm.nb()` needs no `family` argument, and the formula (with the offset) is the same.
 
 ## 4. Interpret
+
+> **In plain terms:** read off what each factor does. Rips and big swell raise the risk; lifeguards, drones, campaigns and flags go with lower risk, most strongly for severe incidents.
 
 ### How to read the numbers
 
@@ -128,6 +136,8 @@ Yes, and this is the main finding for Task 2.
 Incidents per visitor are driven mainly by beach hazard (rips, swell), visitor mix (tourists) and time of year. Lifeguards, drones and safety campaigns are associated with fewer incidents, and the benefit is largest for the most serious ones, which is the group Task 2 cares about.
 
 ## 5. Repeat for each severity
+
+> **In plain terms:** fit the same model separately for mild, close-call and severe incidents, because the factors matter differently at each level.
 
 Same structure for `n_mild`, `n_cc`, `n_sev`. `n_sev` has only about 220 events, so expect warnings and unstable coefficients, and it was close to Poisson in the EDA (variance about equal to the mean). Here it gets a small predictor set as well as the full one.
 

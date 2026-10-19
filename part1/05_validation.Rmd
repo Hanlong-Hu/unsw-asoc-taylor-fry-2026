@@ -49,6 +49,8 @@ panel_f <- panel_f %>% arrange(beach_nm, month_date) %>% group_by(beach_nm) %>%
 
 ## 1. Single split first
 
+> **In plain terms:** hide the most recent year, train on the nine years before it, and see how well each model predicts the hidden year.
+
 Train: months before Sep 2025 (FY2017 to FY2025, 8,640 rows). Test: Sep
 2025 to Aug 2026 (FY2026, 960 rows = 80 beaches x 12 months).
 
@@ -64,6 +66,8 @@ severe. The 26 severe incidents are the most in any year since FY2018,
 so the test year is a hard one for severe incidents.
 
 ## 2. Scoring functions
+
+> **In plain terms:** define how "good" is measured: mainly how much probability the model gave to what actually happened, plus simpler checks such as the total error and whether the riskiest beaches were picked out.
 
 All four functions take the actual counts `y` and the predicted means
 `mu` for the 960 test rows.
@@ -100,6 +104,8 @@ is right on average but far too sure of itself gets punished each time
 an unlikely count turns up.
 
 ## 3. Compare candidate models
+
+> **In plain terms:** try a ladder of models, each adding one group of factors, to see what each group adds when predicting a year the model has not seen.
 
 Each candidate adds one block of predictors to the one before, so the
 table shows what each block buys out of sample. Two variants test the
@@ -205,6 +211,8 @@ up across years.
 
 ## 4. Rolling origin
 
+> **In plain terms:** repeat the test with five different hidden years, so the choice does not hinge on one lucky or unlucky year.
+
 Five folds: test on FY2022, FY2023, FY2024, FY2025 and FY2026, each time
 training on every earlier year (an expanding window). FY2021 is not used
 as a test year, because the `period_2021` flag would then be estimated
@@ -269,6 +277,8 @@ What the folds say:
     reading of "incidents per visitor".
 
 ## 5. Challenger: XGBoost
+
+> **In plain terms:** check whether a flexible machine-learning model beats ours. It does slightly for close calls but not for severe incidents, so we keep the simpler model we can explain.
 
 Does a flexible machine-learning model find something the GLMs miss? We
 run gradient-boosted trees (XGBoost) through the same five folds and
@@ -404,6 +414,8 @@ next step is to find what it picked up (e.g. SHAP interaction values)
 and add those terms to the close-call GLM.
 
 ## 6. Decision
+
+> **In plain terms:** one model per severity. Mild incidents use each beach's own history; close calls and severe incidents are rarer, so their models learn from beach features shared across all beaches.
 
 **One model per severity, each a negative binomial GLM with
 `offset(log(visitors))`:**

@@ -34,6 +34,8 @@ Do **not** use anything from `incidents.csv` that is only known after an inciden
 
 ## 1. Check correlations
 
+> **In plain terms:** find measurements that say almost the same thing (e.g. average and maximum swell), so we keep one of each and the model's results stay readable.
+
 Only the candidate predictors go in (counts excluded). Pairs above \|r\| = 0.6 are listed so you can see the near-misses too.
 
 ```{r corr}
@@ -59,6 +61,8 @@ panel %>% group_by(beach_nm) %>%
 `n_rips`, `rocky`, `fishing`, `rockpool` and `shore_len_m` are fixed per beach. `pa_system` and `flags` change for some beaches over time (installed during the period), `equip_rating` is updated each year, and `surfer_prop` and `tourist_ratio` move monthly.
 
 ## 2. Build the features
+
+> **In plain terms:** create the model inputs: calendar month, a flag for the FY2020-21 dip, rips per km, and lifeguard and drone hours on a log scale (so doubling the hours has a fixed effect and the first hours count most).
 
 ```{r build}
 panel_f <- panel %>% mutate(
@@ -92,6 +96,8 @@ table(panel_f$period_2021)
 ```
 
 ## 3. Decision log
+
+> **In plain terms:** a record of every variable kept or dropped and why, ready for the slides and Q&A.
 
 | Feature | Kept? | Reason |
 |----|----|----|

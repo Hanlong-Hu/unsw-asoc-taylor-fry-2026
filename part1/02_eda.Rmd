@@ -24,6 +24,8 @@ panel
 
 ## 1. Mean vs variance 
 
+> **In plain terms:** check whether incident counts vary more than the simplest count model assumes. They do, which is why later steps use a model that allows for extra spread.
+
 Poisson assumes variance = mean. Real counts are usually more spread out (**overdispersion**), which is why we will use negative binomial.
 
 ```{r disp}
@@ -38,6 +40,8 @@ sapply(panel[vars], function(x) c(
 What to look for: variance much bigger than the mean means Poisson is too confident; many zeros for n_sev is a sparsity warning.
 
 ## 2. Counts over time
+
+> **In plain terms:** look at incidents by month and by year, both raw and per visitor, to see the seasonal pattern and any year that looks out of line.
 
 Add a month-of-year and a year column first; the same table feeds the seasonal and trend views.
 
@@ -70,6 +74,8 @@ Look at: how much of the seasonal shape is just visitors (compare the raw counts
 
 ## 3. Counts vs exposure
 
+> **In plain terms:** check how closely incidents follow visitor numbers. More visitors bring more incidents, but slightly less than one-for-one.
+
 ```{r exposure}
 m <- month(panel$month_date)   # calendar month (computed here so this chunk runs on its own)
 panel$season <- ifelse(m %in% c(11, 12, 1, 2), "summer (Nov-Feb)",
@@ -86,6 +92,8 @@ coef(glm(n_all ~ log(visitors), family = poisson, data = panel))   # cleaner: ha
 Why it matters for step 04: `offset(log(visitors))` forces the slope to be exactly 1. If the Poisson slope is clearly below 1 (the earlier notes saw about 0.9), the offset is a simplification: you may prefer `log(visitors)` as a normal term and let the data pick the exponent. Compare both in step 05.
 
 ## 4. Which beaches?
+
+> **In plain terms:** see whether some beaches are riskier than their crowd size explains. If so, the model needs beach features, not just visitor numbers.
 
 ```{r beaches}
 by_beach <- panel %>% group_by(beach_nm) %>%

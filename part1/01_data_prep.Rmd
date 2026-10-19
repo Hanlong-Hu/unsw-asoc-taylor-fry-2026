@@ -22,6 +22,8 @@ One row per beach per month, with the **count of incidents by severity** next to
 
 ## 1. Load the data
 
+> **In plain terms:** open the two raw files: one row per beach per month, and one row per person involved in an incident.
+
 ```{r load}
 beach <- read.csv("part1/beach_monthly.csv")
 inc   <- read.csv("part1/incidents.csv")
@@ -29,6 +31,8 @@ dim(beach); dim(inc)
 ```
 
 ## 2. Parse the dates (provided)
+
+> **In plain terms:** turn the text dates into real dates so each incident can be matched to the right beach-month.
 
 `month` in `beach` is "mm/yyyy" text. `dte_occurred` in `inc` is "dd/mm/yyyy" text.
 
@@ -40,6 +44,8 @@ range(beach$month_date); range(inc$date)
 ```
 
 ## 3. Collapse people to incidents
+
+> **In plain terms:** an incident can involve up to three people. We count each incident once and label it by the worst outcome for anyone in it.
 
 Hint: give each severity a rank (Mild=1, CloseCall=2, Severe=3), then `group_by(incident_id)` and take the max rank. Keep the beach and month (they are the same for every person in an incident, so `first()` works).
 
@@ -59,6 +65,8 @@ inc2 <- inc1 %>% group_by(incident_id) %>% slice_max(inc_rank, n = 1, with_ties 
 
 ## 4. Count by beach-month and severity
 
+> **In plain terms:** count how many mild, close-call and severe incidents each beach had in each month.
+
 Hint: `count(beach_nm, month_date, worst)` then `pivot_wider(..., values_fill = 0)`. Beach-months with **no** incidents will be missing after the count, so you must join onto the full panel and fill the gaps with 0.
 
 ```{r counts}
@@ -72,6 +80,8 @@ counts <- inc2 %>% count(beach_nm, month_date, inc_type, sort = TRUE) %>% pivot_
 
 ## 5. Join onto the panel
 
+> **In plain terms:** put those counts next to each beach-month's conditions. Months with no incidents get a zero instead of going missing.
+
 ```{r join}
 # panel <- left_join(beach, counts, by = ...) and replace NA counts with 0.
 #   Then add n_all = n_mild + n_cc + n_sev
@@ -84,6 +94,8 @@ nrow(panel)
 ```
 
 ## 6. Sanity checks (should all hold)
+
+> **In plain terms:** check the totals match the raw data (9,600 beach-months, 32,459 incidents) before anything is built on them.
 
 ```{r checks, eval=FALSE}
 stopifnot(nrow(panel) == 9600)

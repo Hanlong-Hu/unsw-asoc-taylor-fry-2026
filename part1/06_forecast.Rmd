@@ -33,6 +33,8 @@ sev_lab <- c(mild = "Mild", cc = "Close call", sev = "Severe")
 
 ## 1. Refit on all data
 
+> **In plain terms:** retrain the chosen models on all ten years, since the latest data is the closest to next year.
+
 Same three models as step 05, now trained on all ten years (FY2017 to FY2026). More data, and the latest year is the closest to next year.
 
 ```{r refit}
@@ -46,6 +48,8 @@ sapply(final, function(m) c(theta = m$theta, n_coef = length(coef(m)), AIC = AIC
 `theta` falls from about 4.6 (mild) to 1.5 (severe): the rarer the incident, the more overdispersed relative to its mean, so the wider the ranges in section 5 will be.
 
 ## 2. Build next year's input table
+
+> **In plain terms:** next year's visitors, weather and safety levels are unknown, so we assume them: recent visitor numbers plus growth, safety as it is today, and each of the last ten years' weather in turn.
 
 One row per beach x month: 80 x 12 = 960 rows. Each input group gets its own rule:
 
@@ -104,6 +108,8 @@ Assumed visitors for FY2027 are about 29.9 million, 1.6% above FY2026 (29.5 mill
 
 ## 3. Does the recipe work? Backtest on FY2026
 
+> **In plain terms:** pretend it is a year ago and run the whole recipe, to check the assumptions themselves add little error. They do not.
+
 Pretend it is August 2025: fit on FY2017 to FY2025, build FY2026 inputs with the *same rules*, and compare with what happened. This checks the assumptions, not just the model.
 
 ```{r backtest}
@@ -135,6 +141,8 @@ Reading it:
 -   **FY2026 itself was a bad year for severe** (26 actual vs about 19 expected). Mild and close calls were slightly overpredicted (3% to 5%). Section 5 asks whether 26 was inside the range we would have quoted.
 
 ## 4. Predict and summarise
+
+> **In plain terms:** the forecast for next year: about 3,600 mild incidents, 316 close calls and 21 severe incidents. Severe risk peaks in winter and is concentrated at a handful of beaches.
 
 ```{r predict}
 fc <- predict_replay(final, newdata, panel_f) %>%
@@ -214,6 +222,8 @@ How to read these: the top-10 table is the "where" for severe incidents. Compare
 
 ## 5. Uncertainty
 
+> **In plain terms:** simulate 5,000 possible years to turn the forecast into a range: about 15 to 33 severe incidents in 9 years out of 10.
+
 A point forecast of 21 severe incidents hides a wide range. We simulate 5,000 possible years, with three sources of uncertainty in each:
 
 1.  **Weather:** draw one of the 10 past years' weather (the same year for every beach, since a stormy winter hits the whole coast).
@@ -270,6 +280,8 @@ How to present this: "We expect about 21 to 23 severe incidents next year if fun
 
 ## 6. Hand-off table for Task 2
 
+> **In plain terms:** save the beach-by-month forecast that Task 2 uses as its "no extra funding" starting point.
+
 One row per beach x month with the inputs used and the expected counts. Task 2 changes the safety inputs in `newdata` and calls `predict_replay(final, newdata_changed, panel_f)` to get the new expected counts.
 
 ```{r save}
@@ -280,6 +292,8 @@ write.csv(forecast_fy2027, "part1/forecast_fy2027.csv", row.names = FALSE)
 ```
 
 ## 7. Assumptions and limitations
+
+> **In plain terms:** everything we assumed, and what could make the forecast wrong, in one place for the slides.
 
 **Assumptions**
 
