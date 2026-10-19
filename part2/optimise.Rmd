@@ -1,0 +1,301 @@
+---
+title: "optimise: budget allocation MILP"
+output: html_document
+---
+
+```{r setup, message=FALSE}
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(ompr)
+library(ompr.roi)
+library(ROI)
+library(ROI.plugin.glpk)
+library(lubridate)
+```
+
+## 1. Data, GLM and baseline
+
+```{r data-model}
+beach_data <- readRDS("../part1/panel.rds")
+
+glm_fit <- glm(
+  n_sev ~ lg_hrs + drone_hrs +
+    campaign_idx + first_aid_cap +
+    pa_system + flags,
+  family = poisson(link = "log"),
+  data = beach_data
+)
+stopifnot(exists("glm_fit"))
+
+needed  <- c(all.vars(formula(glm_fit)), "beach_nm", "postcode", "month")
+missing <- setdiff(needed, names(beach_data))
+if (length(missing) > 0) stop("Missing variables: ", paste(missing, collapse = ", "))
+
+print(round(summary(glm_fit)$coefficients, 6))
+
+b    <- coef(glm_fit)
+b_lg <- b[["lg_hrs"]];       b_dr <- b[["drone_hrs"]]
+b_c  <- b[["campaign_idx"]]; b_fa <- b[["first_aid_cap"]]
+b_pa <- b[["pa_system"]];    b_fl <- b[["flags"]]
+
+# A lever with a coefficient >= 0 looks harmful/useless to the optimiser, so it will never be bought.
+levers <- c("lg_hrs", "drone_hrs", "campaign_idx", "first_aid_cap", "pa_system", "flags")
+if (any(b[levers] >= 0))
+  warning("Non-negative coefficient for: ",
+          paste(levers[b[levers] >= 0], collapse = ", "),
+          " - the optimiser will not spend on these. Check the model.")
+```
+
+```{r window}
+# Planning year = the most recent 12 months in the panel
+beach_data <- beach_data %>%
+  mutate(date = as.Date(paste0("01/", month), format = "%d/%m/%Y"))
+
+last_date <- max(beach_data$date)
+
+win <- beach_data %>%
+  filter(date > last_date %m-% months(12)) %>%
+  arrange(beach_nm, date)
+
+stopifnot(all(table(win$beach_nm) == 12))
+
+beach_ids <- unique(win$beach_nm)
+pc_ids    <- sort(unique(win$postcode))
+
+win <- win %>%
+  mutate(
+    r       = row_number(),
+    b       = match(beach_nm, beach_ids),
+    p       = match(postcode, pc_ids),
+    mth_idx = rep(1:12, times = length(beach_ids)),
+    cal     = month(date)
+  )
+
+win$mu0 <- predict(glm_fit, newdata = win, type = "response")
+baseline_total <- sum(win$mu0)
+
+cat("Planning window:", format(min(win$date), "%b %Y"), "to", format(max(win$date), "%b %Y"), "\n")
+cat("Baseline expected severe incidents:", round(baseline_total, 2), "\n")
+```
+
+## 2. Prices and settings
+
+```{r prices}
+prices <- read.csv("../pricing.csv")
+price  <- function(x) prices$cost_fd[match(x, prices$item)]
+
+BUDGET     <- 2e6
+AMORT      <- 1      # years to spread one-off costs over (1 = full cash cost this year)
+K          <- 4      # tangent lines per beach-month for the exp() approximation
+TIME_LIMIT <- 300    # solver time limit, seconds
+MAX_FTE    <- 2      # max full-time lifeguards per beach
+MAX_FA     <- 4      # max first-aid purchases per postcode
+ACTIVE_SHARE <- 0.95 # only model the beach-months holding this share of the achievable gain
+GAP        <- 0.01   # accept a solution within 1% of the best bound (used by HiGHS)
+
+DRONE_CAP  <- 120    # flight hours / month per drone
+FTE_HRS    <- 1750   # lifeguard hours / FTE / year
+FTE_H      <- FTE_HRS / 12
+CAMP_LEVEL <- 0.7
+SUMMER     <- c(11, 12, 1, 2)
+FA_STEP    <- 10
+FA_MAX     <- 100
+PA_MAINT   <- 2000
+
+c_lg      <- price("Casual SLSC lifeguard")
+c_fte     <- price("Full-time SLSC lifeguard") + price("Full-time recruitment") / AMORT
+c_dr_hr   <- price("Drone operator (casual)")
+c_dr_buy  <- (price("Drone hardware") + price("Drone operator training")) / AMORT
+c_camp    <- price("Beach safety education campaign")
+c_fa      <- price("Community first aid & rescue training")
+c_pa      <- price("PA system") / AMORT + PA_MAINT
+c_fl      <- price("Rip-warning flags/signage") / AMORT
+stopifnot(!anyNA(c(c_lg, c_fte, c_dr_hr, c_dr_buy, c_camp, c_fa, c_pa, c_fl)))
+```
+
+## 3. Precompute what each purchase can change
+
+```{r precompute}
+N <- nrow(win); B <- length(beach_ids); P <- length(pc_ids)
+bi  <- win$b          # beach index of each row
+pci <- win$p          # postcode index of each row
+
+LG_CAP  <- max(beach_data$lg_hrs)                 # do not extrapolate past observed hours
+lg_room <- pmax(LG_CAP - win$lg_hrs, 0)
+
+# Drones: existing equipment if the beach already flew in the window
+have_b  <- as.numeric(tapply(win$drone_hrs, win$b, max) > 0)
+dcap_b  <- pmax(DRONE_CAP, as.numeric(tapply(win$drone_hrs, win$b, max)))
+room_dr <- ifelse(have_b[bi] == 1, pmax(dcap_b[bi] - win$drone_hrs, 0), 0)
+new_dr  <- ifelse(have_b[bi] == 1, 0, DRONE_CAP)
+
+# Flags / PA: only rows where not already installed benefit
+fl_mask <- as.numeric(win$flags == 0)
+pa_mask <- as.numeric(win$pa_system == 0)
+
+# Campaign: raises campaign_idx to at least 0.7 in Nov-Feb
+camp_gain <- ifelse(win$cal %in% SUMMER, pmax(CAMP_LEVEL - win$campaign_idx, 0), 0)
+
+# First aid: +10 per purchase, capped at 100, effective from the following month
+fa_cap_w <- ifelse(win$mth_idx == 1, 0, pmax(FA_MAX - win$first_aid_cap, 0))
+
+# Tangent lines for mu = mu0 * exp(delta). delta is the change in the linear predictor.
+d_min <- pmin(0, b_lg) * lg_room +
+         pmin(0, b_dr) * (room_dr + new_dr) +
+         pmin(0, b_fa) * fa_cap_w +
+         pmin(0, b_fl) * fl_mask +
+         pmin(0, b_pa) * pa_mask +
+         pmin(0, b_c)  * camp_gain
+
+d0  <- t(sapply(d_min, function(m) seq(m, 0, length.out = K)))   # N x K tangent points
+S   <- win$mu0 * exp(d0)           # slope of each tangent
+Cst <- S * (1 - d0)                # intercept of each tangent
+
+# --- Speed-up 1: only model beach-months that can actually shed incidents -------------
+# Rows are ranked by the most incidents any purchase could remove; the rest are held at
+# their baseline (no variables, no constraints). This usually cuts the model several-fold.
+pot <- win$mu0 * (1 - exp(d_min))
+if (sum(pot) <= 0) stop("No lever can reduce incidents under this GLM (check coefficient signs).")
+ord <- order(-pot)
+act <- sort(ord[seq_len(which(cumsum(pot[ord]) / sum(pot) >= ACTIVE_SHARE)[1])])
+isact <- as.numeric(seq_len(N) %in% act)
+cat("Modelled beach-months:", length(act), "of", N, "\n")
+
+# only allow purchases that touch at least one modelled row
+need_fl   <- as.numeric(tapply(fl_mask * isact, win$b, max))
+need_pa   <- as.numeric(tapply(pa_mask * isact, win$b, max))
+need_camp <- as.numeric(tapply(camp_gain * isact, win$p, max) > 0)
+need_fa   <- as.numeric(tapply(fa_cap_w * isact, win$p, max) > 0)
+have_act  <- as.numeric(tapply(isact, win$b, max) > 0)       # beach has a modelled row
+```
+
+## 4. The MILP
+
+The objective is sum of mu0 * exp(delta). That is convex in the decisions, so each row gets a variable
+`z >= mu0 * exp(delta)`, approximated from below by K tangent lines.
+
+```{r model}
+model <- MIPModel() %>%
+  # row-level (beach-month) variables
+  add_variable(lg[r],  r = act, type = "continuous", lb = 0) %>%   # extra casual lifeguard hours
+  add_variable(dh[r],  r = act, type = "continuous", lb = 0) %>%   # extra drone flight hours
+  add_variable(w[r],   r = act, type = "continuous", lb = 0) %>%   # first-aid points in effect
+  add_variable(z[r],   r = act, type = "continuous", lb = 0) %>%   # expected incidents (epigraph)
+  # beach-level
+  add_variable(fte[i],  i = 1:B, type = "integer", lb = 0, ub = MAX_FTE) %>%
+  add_variable(ydr[i],  i = 1:B, type = "binary") %>%              # buy drone + operator
+  add_variable(flag[i], i = 1:B, type = "binary") %>%
+  add_variable(pa[i],   i = 1:B, type = "binary") %>%
+  # postcode-level
+  add_variable(camp[j], j = 1:P, type = "binary") %>%
+  add_variable(fa[j],   j = 1:P, type = "integer", lb = 0, ub = MAX_FA) %>%
+  set_objective(sum_expr(z[r], r = act), "min") %>%
+  # tangent-line approximation of mu0 * exp(delta)
+  add_constraint(
+    z[r] >= S[r, k] * (b_lg * lg[r] + b_lg * FTE_H * fte[bi[r]] + b_dr * dh[r] +
+                       b_fa * w[r] + b_fl * fl_mask[r] * flag[bi[r]] +
+                       b_pa * pa_mask[r] * pa[bi[r]] +
+                       b_c * camp_gain[r] * camp[pci[r]]) + Cst[r, k],
+    r = act, k = 1:K
+  ) %>%
+  # physical limits
+  add_constraint(lg[r] + FTE_H * fte[bi[r]] <= lg_room[r], r = act) %>%
+  add_constraint(dh[r] <= room_dr[r] + new_dr[r] * ydr[bi[r]], r = act) %>%
+  add_constraint(w[r] <= FA_STEP * fa[pci[r]], r = act) %>%
+  add_constraint(w[r] <= fa_cap_w[r], r = act) %>%
+  # only buy what can have an effect
+  add_constraint(ydr[i]  <= (1 - have_b[i]) * have_act[i], i = 1:B) %>%
+  add_constraint(fte[i]  <= MAX_FTE * have_act[i], i = 1:B) %>%
+  add_constraint(flag[i] <= need_fl[i],    i = 1:B) %>%
+  add_constraint(pa[i]   <= need_pa[i],    i = 1:B) %>%
+  add_constraint(camp[j] <= need_camp[j],  j = 1:P) %>%
+  add_constraint(fa[j]   <= MAX_FA * need_fa[j], j = 1:P) %>%
+  # budget
+  add_constraint(
+    sum_expr(c_lg * lg[r] + c_dr_hr * dh[r], r = act) +
+    sum_expr(c_fte * fte[i] + c_dr_buy * ydr[i] + c_fl * flag[i] + c_pa * pa[i], i = 1:B) +
+    sum_expr(c_camp * camp[j] + c_fa * fa[j], j = 1:P) <= BUDGET
+  )
+```
+
+```{r solve}
+# Speed-up 2: HiGHS is far faster than GLPK on this kind of MILP. Install it if you can:
+#   install.packages("ROI.plugin.highs")
+# Speed-up 3: stop at a 1% gap instead of proving exact optimality (HiGHS only).
+if (requireNamespace("ROI.plugin.highs", quietly = TRUE)) {
+  library(ROI.plugin.highs)
+  res <- solve_model(model, with_ROI(solver = "highs",
+                                     control = list(time_limit = TIME_LIMIT, mip_rel_gap = GAP)))
+} else {
+  message("ROI.plugin.highs not installed - falling back to GLPK (slower, no gap setting).")
+  res <- solve_model(model, with_ROI(solver = "glpk", tm_limit = TIME_LIMIT * 1000))
+}
+cat("Solver status:", res$status, "\n")
+```
+
+## 5. Results (recomputed exactly from the GLM)
+
+```{r results}
+# row-level solutions only exist for the modelled rows; everything else stays at zero
+fill_rows <- function(df) { v <- numeric(N); v[df$r] <- df$value; v }
+lg_v   <- fill_rows(get_solution(res, lg[r]))
+dh_v   <- fill_rows(get_solution(res, dh[r]))
+fte_v  <- get_solution(res, fte[i])  %>% arrange(i) %>% pull(value)
+ydr_v  <- get_solution(res, ydr[i])  %>% arrange(i) %>% pull(value)
+flag_v <- get_solution(res, flag[i]) %>% arrange(i) %>% pull(value)
+pa_v   <- get_solution(res, pa[i])   %>% arrange(i) %>% pull(value)
+camp_v <- get_solution(res, camp[j]) %>% arrange(j) %>% pull(value)
+fa_v   <- get_solution(res, fa[j])   %>% arrange(j) %>% pull(value)
+
+# first-aid points actually in effect (use the physical rule, not the solver's slack)
+w_true <- if (b_fa < 0) pmin(FA_STEP * fa_v[pci], fa_cap_w) else 0 * fa_cap_w
+
+d_eta <- b_lg * (lg_v + FTE_H * fte_v[bi]) + b_dr * dh_v + b_fa * w_true +
+         b_fl * fl_mask * flag_v[bi] + b_pa * pa_mask * pa_v[bi] +
+         b_c * camp_gain * camp_v[pci]
+
+win$mu_new <- win$mu0 * exp(d_eta)
+
+cost <- c(
+  casual_lifeguards = c_lg * sum(lg_v),
+  full_time_lifeguards = c_fte * sum(fte_v),
+  drone_hours = c_dr_hr * sum(dh_v),
+  drone_hardware_training = c_dr_buy * sum(ydr_v),
+  campaigns = c_camp * sum(camp_v),
+  first_aid = c_fa * sum(fa_v),
+  pa_systems = c_pa * sum(pa_v),
+  flags = c_fl * sum(flag_v)
+)
+stopifnot(sum(cost) <= BUDGET + 1e-4)
+
+cat(sprintf("Spent %s of %s\n", format(round(sum(cost)), big.mark = ","), format(BUDGET, big.mark = ",")))
+cat(sprintf("Expected severe incidents: %.1f -> %.1f  (%.1f avoided, %.1f%%)\n",
+            baseline_total, sum(win$mu_new), baseline_total - sum(win$mu_new),
+            100 * (baseline_total - sum(win$mu_new)) / baseline_total))
+cat(sprintf("MILP objective (tangent approximation, a lower bound on incidents): %.1f\n", sum(get_solution(res, z[r])$value) + sum(win$mu0[-act])))
+print(round(cost))
+```
+
+```{r allocation}
+by_beach <- tibble(
+  beach = beach_ids,
+  postcode = win %>% group_by(b) %>% summarise(p = first(postcode)) %>% pull(p),
+  casual_lg_hrs = as.numeric(tapply(lg_v, bi, sum)),
+  fte = fte_v, drone_bought = ydr_v, drone_hrs = as.numeric(tapply(dh_v, bi, sum)),
+  flags = flag_v, pa = pa_v,
+  expected_before = as.numeric(tapply(win$mu0, bi, sum)),
+  expected_after  = as.numeric(tapply(win$mu_new, bi, sum))
+) %>%
+  filter(casual_lg_hrs > 0.5 | fte > 0 | drone_bought > 0 | drone_hrs > 0.5 | flags > 0 | pa > 0) %>%
+  arrange(desc(expected_before - expected_after))
+
+by_postcode <- tibble(postcode = pc_ids, campaign = camp_v, first_aid_purchases = fa_v) %>%
+  filter(campaign > 0 | first_aid_purchases > 0)
+
+by_beach
+by_postcode
+
+write.csv(by_beach, "optimal_allocation_by_beach.csv", row.names = FALSE)
+write.csv(by_postcode, "optimal_allocation_by_postcode.csv", row.names = FALSE)
+```
