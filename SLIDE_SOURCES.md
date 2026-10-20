@@ -19,7 +19,8 @@ Paths are relative to the project root. Line numbers are as of commit on 2026-10
 |---|---|---|
 | $2M a year, minimise severe incidents | `context.md:22-23` (Task 2) | Brief |
 | "Mostly drones, plus winter patrols, campaigns and rip flags … about 12.5 a year" | `part2/optimise.Rmd` §5 Results (`:228`); `presentation/optimise_results.md:7-22` | Notebook |
-| Team name, members, date | — | Placeholder |
+| Date: October 2026 | `timeline_plan.md:3` (main checkout, gitignored): slides due Thu 22 Oct, heats from 29 Oct | Planning note |
+| Team name, members | — (not recorded anywhere in the project) | Placeholder |
 
 ### 2 · `exec` — Severe risk is concentrated, so $2M can target it
 | Claim | Source | Check |
@@ -55,7 +56,7 @@ Divider, no figures.
 |---|---|---|
 | June visit ~5–6× riskier than January | `presentation_notes.md:60` (02 EDA) | Recomputed: 0.299 vs 0.054 severe per 100k visits = **5.5×** |
 | ~80% of beach-months patrolled Sep–Apr vs ~12% May–Aug | `part1/04_baseline_models.Rmd:121`; `analysis/NOTES.md:13` | Recomputed: 0.80 vs 0.12 |
-| Chart: visitors vs severe per 100k by month | `part1/02_eda.Rmd` §2 Counts over time (`:40`); `part1/06_forecast.Rmd` `by_month` chunk (`:159`) | Placeholder (chart to draw) |
+| Chart: visitors a year and severe per 100k visits by month (two panels, one axis each) | `part2/robustness/chart_data.R` "Slide 6"; `panel_f.rds`, 10 years | Recomputed (Jan 4.8M visitors; Jun 0.30 vs Jan 0.05 per 100k) |
 
 ### 7 · `model` — Six inputs, one simple model per severity
 | Claim | Source | Check |
@@ -69,9 +70,9 @@ Divider, no figures.
 | Claim | Source | Check |
 |---|---|---|
 | Rolling-origin test | `part1/05_validation.Rmd` §4 Rolling origin (`:206`) | Notebook |
-| XGBoost challenger did not beat it | `part1/05_validation.Rmd` §5 (`:271`), verdicts `:359-375`, decision `:401` | Notebook |
-| FY2026 backtest inside the forecast range | `part1/06_forecast.Rmd:267` (§5, backtest ranges) and §3 Backtest (`:105`) | Notebook |
-| "[N] years", "Error: [metric]" | `part1/05_validation.Rmd` §4 (5 folds, FY2022–26) and §2 Scoring functions (`:66`, log score) | Placeholder |
+| XGBoost "no clear improvement: slightly better log score, 12% too high on severe totals" | `part1/05_validation.Rmd` §5 (`:271`), severe verdict `:369-371`, decision `:401`; table in `part1/05_validation.html` (severe log score 0.0878 GLM vs 0.0854 XGB; ratio 1.12) | Notebook. **Corrected 2026-10-20**: the slide said "did not beat it", which overstated `:369` ("no clear winner") |
+| 5 test years (FY2022–26), log score | `part1/05_validation.Rmd` §4 (`:206`) and §2 Scoring functions (`:66`) | Notebook |
+| Chart: forecast, 90% range and actual per test year; every actual inside the range | `part2/robustness/chart_data.R` "Slide 8 / A2" | Recomputed (severe 5 of 5 inside; FY2026: 26 vs 19.2, range 13–30) |
 
 ### 9 · `forecast` — Expect about 21 severe incidents in FY2027
 | Claim | Source | Check |
@@ -87,7 +88,7 @@ Divider, no figures.
 | Seven Mile Beach about 6× Bondi's severe risk per visit | `part1/06_forecast.Rmd:209` (per-visit risk in top-10 table) | Recomputed: FY2027 forecast 3.05 vs 0.51 per million visits = **6.0×** (history: 7.7×). **Corrected 2026-10-20**: the slide previously said 5×, taken from an early design note; 5× holds against North Wollongong and Byron, not Bondi |
 | May–Aug: ~44% of the year's severe risk | `part1/06_forecast.Rmd:177` | Notebook (9.5 of 21.4) |
 | Top 10 beaches ≈ half of severe risk (speaker notes) | `part1/06_forecast.Rmd:206` | Notebook |
-| Heatmap | `part1/06_forecast.Rmd` `heatmap` chunk (`:195`) | Placeholder (chart to draw) |
+| Heatmap: top 20 beaches × month, expected severe, with yearly totals | `part2/robustness/chart_data.R` "Slide 10" (from `forecast_fy2027.rds`); notebook version (close calls + severe) at `part1/06_forecast.Rmd:195` | Recomputed |
 
 ### 11 · `drivers` — Lifeguards and drones go with lower severe risk
 | Claim | Source | Check |
@@ -97,7 +98,7 @@ Divider, no figures.
 | Lower risk: lifeguard hours, drone hours, campaigns, flags | `part2/optimise.Rmd:40` (prints the lever coefficients) | Notebook |
 | First aid and PA show no effect (speaker notes) | `part2/optimise.Rmd:40-45` | Notebook |
 | Association, not proof | `part1/06_forecast.Rmd:295`; robustness `presentation_notes.md:221-247` | Notebook |
-| Rate-ratio dot chart | `part1/04_baseline_models.Rmd` §5 Repeat for each severity (`:130`) | Placeholder (chart to draw) |
+| Rate-ratio dot chart with 95% ranges (swell ×1.99, drones 0→100 hrs ×0.30, first aid ×1.03 …) | `part2/robustness/chart_data.R` "Slide 11 / A1" (from `final$sev`) | Recomputed |
 
 ## Task 2 · Allocation
 
@@ -127,7 +128,8 @@ Divider, no figures.
 | Education only 2.9, ~$209k ($615k spend) | `part2/optimise.Rmd` §7 Alternatives (`:329`) | Notebook |
 | Spread evenly 3.0, ~$656k | `part2/optimise.Rmd` §7 | Notebook |
 | Summer-only patrols 0.3, ~$5.6M | `part2/optimise.Rmd` §7 | Notebook |
-| Cost-per-avoided bar chart | same table, `presentation_notes.md:208-215` | Placeholder (chart to draw) |
+| Bars: avoided per $1M (6.2, 4.8, 1.5, 0.2) | avoided ÷ spend from `part2/optimise.Rmd` §7 | Derived |
+| Stacked $2M bar on slide 13 | `presentation/optimise_results.md:14-22` | Notebook |
 
 ### 16 · `implement` — Ready before winter, reviewed after 12 months
 | Claim | Source | Check |
@@ -136,7 +138,7 @@ Divider, no figures.
 | Campaigns work Nov–Feb | `part2/optimise.Rmd:73` (`SUMMER`) | Model assumption |
 | Patrols start in May; half the gain in May–Aug | `part2/optimise.Rmd:285` (`by_month`) | Notebook |
 | Quarter-by-quarter actions | — | Draft |
-| Drone and hiring lead times | — | Placeholder (not in the data) |
+| "The price list gives no lead times" | `part1/pricing.csv` (no lead-time column) | Data |
 
 ## Close
 
@@ -160,30 +162,35 @@ Repeats slide 2: sources as for `exec`. "Approve the $2M plan … 12-month revie
 | Claim | Source | Check |
 |---|---|---|
 | NB GLM per severity and its terms | `part1/chosen_specs.rds` (from `part1/05_validation.Rmd:439`); `part1/06_forecast.Rmd:39-42` | Notebook |
-| Coefficient and model-choice tables | `part1/04_baseline_models.Rmd` §5 (`:130`); `part1/05_validation.Rmd` §3 (`:102`) | Placeholder (tables to paste) |
+| Rate-ratio table | `part2/robustness/chart_data.R` "Slide 11 / A1" | Recomputed |
+| Model-choice table (θ = 1.47, offset, log1p, traits vs beach effects, XGBoost) | `part1/06_forecast.Rmd:46`; `presentation_notes.md` §02–03; `part1/05_validation.html` rolling-origin severe table (beach effects 0.34 vs traits 0.088); `part1/05_validation.Rmd:369` | Notebook |
 
 ### A2 · `a2` — Validation detail
 | Claim | Source | Check |
 |---|---|---|
-| Rolling origin, metrics, range coverage | `part1/05_validation.Rmd` §2 (`:66`), §4 (`:206`), §5 (`:271`); `part1/06_forecast.Rmd:259-267` | Placeholder (fill FY range and metric names) |
+| Rolling origin FY2022–FY2026; log score, MAE, range coverage | `part1/05_validation.Rmd` §2 (`:66`), §4 (`:206`) | Notebook |
+| Severe forecast / range / actual table; coverage 5/5 mild, 2/5 close calls, 5/5 severe | `part2/robustness/chart_data.R` "Slide 8 / A2" | Recomputed |
+| Log score GLM vs XGBoost and folds won | `part1/05_validation.html`, table "Rolling origin, 5 folds: chosen GLM vs XGBoost" | Notebook |
 
 ### A3 · `a3` — Forecast uncertainty (simulation)
 | Claim | Source | Check |
 |---|---|---|
-| 5,000 simulated years; weather, parameter and chance draws; 15–33 | `part1/06_forecast.Rmd` §5 (`:215-251`) | Notebook ("[N]" on the slide = 5,000; parameter uncertainty is included) |
+| 5,000 simulated years; weather, parameter and chance draws; 15–33 | `part1/06_forecast.Rmd` §5 (`:215-251`) | Notebook |
+| Histogram and percentile table (mild 3,385–3,832, close calls 280–363, severe 15–33, median 23) | `part2/robustness/chart_data.R` "A3" (from `forecast_fy2027.rds$sims`) | Recomputed |
+| Median above point forecast; 1 in 3 chance of 26+ | `part1/06_forecast.Rmd:225`, `:269` | Notebook |
 
 ### A4 · `a4` — Optimisation formulation
 | Claim | Source | Check |
 |---|---|---|
 | Variables, objective, constraints, ≥ 97-hr patrols | `part2/optimise.Rmd` §3–4 (`:84`, `:152`) | Notebook |
 | HiGHS, within 0.6% of optimal | `part2/optimise.Rmd` `solve` chunk (`:201`) | Notebook |
-| $1M–$3M budget curve | `part2/robustness/scenario.R` (runs `budget_1m`, `budget_3m`); `presentation_notes.md:225-247` (check 12) | Notebook |
+| Budget curve $0–3M (8.5, 10.6, 11.8, 12.5, 13.0, 13.2) | `part2/robustness/scenario.R` runs `budget_0.5m` … `budget_3m` (`BUDGET` env var) | Notebook |
 
 ### A5 · `a5` — Pricing inputs
 | Claim | Source | Check |
 |---|---|---|
 | Initiative price list | `part1/pricing.csv`; used in `part2/optimise.Rmd` §2 (`:57`) | Data |
-| Conversion to hours, fixed costs | `part2/optimise.Rmd` §2 (`FTE_HRS`, `DRONE_CAP`, `AMORT`) | Placeholder (summarise on slide) |
+| Conversion to hours, costs charged in full (`AMORT = 1`), 3-year drone life | `part2/optimise.Rmd` §2 (`FTE_HRS`, `DRONE_CAP`, `AMORT`); `part1/pricing.csv` notes column | Notebook |
 
 ### A6 · `a6` — The plan holds under every check: 8–13 fewer severe incidents
 | Claim | Source | Check |

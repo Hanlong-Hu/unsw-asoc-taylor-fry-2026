@@ -1,23 +1,40 @@
-<section id="a4" data-transition="fade" style="background:#FFFFFF;color:#1F2A4D;font-family:Inter, Arial, sans-serif;padding:112px 128px 160px;display:flex;flex-direction:column;gap:40px">
+<section id="a4" data-transition="fade" style="background:#FFFFFF;color:#1F2A4D;font-family:Inter, Arial, sans-serif;padding:112px 128px 160px;display:flex;flex-direction:column;gap:32px">
 <div style="display:flex;flex-direction:column;gap:16px">
 <div style="width:96px;height:8px;background:#5D7BCC"></div>
 <p style="font-size:24px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#5D7BCC">Appendix · A4</p>
 <h2 style="font-size:56px;font-weight:700;line-height:1.1;letter-spacing:-0.5px;color:#5D7BCC">Optimisation formulation</h2>
 </div>
-<div style="background:#EEF2FB;border-left:8px solid #5D7BCC;padding:28px 40px">
-<p style="font-size:28px;line-height:1.4;color:#1F2A4D"><b>Choose</b> extra lifeguard and drone hours per beach-month, new drones, rip flags and campaigns <b>to minimise</b> expected severe incidents under the Task 1 model, <b>subject to</b> cost ≤ $2M, hours within observed ranges and new patrols ≥ 97 hrs a month. Mixed-integer program, HiGHS, within 0.6% of optimal.</p>
+<div style="background:#EEF2FB;border-left:8px solid #5D7BCC;padding:20px 40px">
+<p style="font-size:28px;line-height:1.4;color:#1F2A4D"><b>Mixed-integer program</b> on the Task 1 severe model, solved with HiGHS to within 0.6% of the best possible plan.</p>
 </div>
-<div style="flex:1;display:flex;flex-direction:row;gap:32px">
-<div style="flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:12px;background:#EEF2FB;border:3px dashed #5D7BCC;border-radius:16px;padding:32px">
-<p style="font-size:24px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#5D7BCC">Table placeholder</p>
-<p style="font-size:24px;line-height:1.4;color:#1F2A4D;text-align:center;width:640px">Decision variables, objective and every constraint, written out in symbols</p>
+<div style="display:flex;flex-direction:row;gap:48px">
+<div style="flex:1.1;display:flex;flex-direction:column;gap:12px">
+<table style="font-family:Inter, Arial, sans-serif;font-size:24px;color:#1F2A4D">
+<tr style="background:#EEF2FB"><td style="width:24%;padding:8px 16px"><b>Decide</b></td><td style="width:76%">Extra lifeguard and drone hours per beach-month; new drones and rip flags per beach; campaigns per postcode</td></tr>
+<tr><td><b>Minimise</b></td><td>Expected severe incidents: Σ μ₀ × exp(Δ), with Δ from the Task 1 model</td></tr>
+<tr style="background:#EEF2FB"><td><b>Budget</b></td><td>Total cost ≤ $2M, one-off costs charged in full in FY2027</td></tr>
+<tr><td><b>Limits</b></td><td>Lifeguards ≤ 3,498 hrs a month; drones ≤ 120 hrs each; new patrols ≥ 97 hrs</td></tr>
+<tr style="background:#EEF2FB"><td><b>Not bought</b></td><td>First aid and PA: no effect on severe incidents</td></tr>
+</table>
 </div>
-<div style="flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:12px;background:#EEF2FB;border:3px dashed #5D7BCC;border-radius:16px;padding:32px">
-<p style="font-size:24px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#5D7BCC">Chart placeholder</p>
-<p style="font-size:24px;line-height:1.4;color:#1F2A4D;text-align:center;width:640px">Sensitivity: severe incidents avoided as the budget moves from $1M to $3M, with $2M marked in navy</p>
+<div style="flex:1;display:flex;flex-direction:column;gap:12px">
+<p style="font-size:24px;font-weight:700;color:#6B7280">Severe incidents avoided a year, by budget</p>
+<div style="display:flex;flex-direction:row;align-items:end;gap:12px;border-bottom:2px solid #E5E7EB">
+<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><p style="font-size:24px;color:#1F2A4D">0</p><div style="width:56px;height:2px;background:#5D7BCC"></div></div>
+<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><p style="font-size:24px;color:#1F2A4D">8.5</p><div style="width:56px;height:173px;background:#5D7BCC;border-radius:4px 4px 0px 0px"></div></div>
+<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><p style="font-size:24px;color:#1F2A4D">10.6</p><div style="width:56px;height:217px;background:#5D7BCC;border-radius:4px 4px 0px 0px"></div></div>
+<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><p style="font-size:24px;color:#1F2A4D">11.8</p><div style="width:56px;height:241px;background:#5D7BCC;border-radius:4px 4px 0px 0px"></div></div>
+<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><p style="font-size:24px;font-weight:700;color:#1F2A4D">12.5</p><div style="width:56px;height:255px;background:#1F2A4D;border-radius:4px 4px 0px 0px"></div></div>
+<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><p style="font-size:24px;color:#1F2A4D">13.0</p><div style="width:56px;height:265px;background:#5D7BCC;border-radius:4px 4px 0px 0px"></div></div>
+<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><p style="font-size:24px;color:#1F2A4D">13.2</p><div style="width:56px;height:270px;background:#5D7BCC;border-radius:4px 4px 0px 0px"></div></div>
+</div>
+<div style="display:flex;flex-direction:row;gap:12px">
+<p style="flex:1;font-size:24px;color:#6B7280;text-align:center">$0</p><p style="flex:1;font-size:24px;color:#6B7280;text-align:center">0.5M</p><p style="flex:1;font-size:24px;color:#6B7280;text-align:center">1M</p><p style="flex:1;font-size:24px;color:#6B7280;text-align:center">1.5M</p><p style="flex:1;font-size:24px;font-weight:700;color:#1F2A4D;text-align:center">2M</p><p style="flex:1;font-size:24px;color:#6B7280;text-align:center">2.5M</p><p style="flex:1;font-size:24px;color:#6B7280;text-align:center">3M</p>
+</div>
+<p style="font-size:24px;line-height:1.4;color:#1F2A4D">The first $0.5M avoids 8.5; going from $2M to $3M adds 0.7.</p>
 </div>
 </div>
-<p style="position:absolute;left:128px;bottom:64px;width:1200px;font-size:24px;color:#6B7280">Appendix · technical detail for Q&amp;A</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1400px;font-size:24px;color:#6B7280">part2/optimise.Rmd §3–4 · budget runs: part2/robustness/scenario.R, re-optimised at each budget</p>
 <p style="position:absolute;right:128px;bottom:64px;width:200px;font-size:24px;color:#6B7280;text-align:right">A4</p>
-<aside>Q&amp;A backup. Use if asked how the mix was chosen, what constraints were imposed, or what happens with more or less money.</aside>
+<aside>Q&amp;A backup. Use if asked how the mix was chosen, what constraints were imposed, or what happens with more or less money. The optimiser picks hours and purchases to minimise expected severe incidents under the Task 1 model. Hours enter through log(1 + hours), so the first hours do the most and returns fall fast: the first half million already avoids about 8.5, and a third million adds less than one. If the budget were cut, fund drones and campaigns first.</aside>
 </section>
