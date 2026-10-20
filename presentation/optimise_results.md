@@ -1,28 +1,41 @@
-# part2/optimise.Rmd results (run 2026-10-20)
+# part2/optimise.Rmd results (Part 1 model, run 2026-10-20)
 
-Run unchanged against `part1/panel.rds` and `part1/pricing.csv`. The Rmd reads `../pricing.csv`, so pricing had to be placed at the repo root for it to run. Solver: HiGHS, status success, ~6 s.
+The optimiser now uses the Part 1 severe model (`part1/forecast_fy2027.rds`: negative binomial, visitors offset, `log1p` lifeguard and drone hours), and its FY2027 forecast is the baseline. The earlier version used a separate Poisson GLM with no exposure, month or beach terms; it found lifeguards harmful and put 92% of the budget into first aid.
+
+Solver: HiGHS called directly with a 1% gap; it finished Optimal at a 0.6% gap in about 1 minute. Effects are recomputed exactly from the hours bought.
 
 ## Headline
-- Baseline (Sep 2025 – Aug 2026 conditions, Poisson GLM): **19.3** severe incidents
-- After the $2M plan: **6.7**, so **12.6 avoided (65%)**
-- 90% range on avoided: **10.9–14.7** (2,000 draws of the GLM coefficients, allocation held fixed; coefficient uncertainty only)
-- Cost per severe incident avoided: ~$159k
+- Baseline FY2027: **21.4** expected severe incidents (simulated 90% range 15–33, median 23, matching Part 1)
+- With the plan: **9.0**, so **12.5 avoided (58%)**
+- Expected avoided, 90% range: **11–16** (5,000 simulated years: weather, parameters; allocation fixed)
+- Severe incidents in a year with the plan: 4–16 (90%), median 9
+- Cost per severe incident avoided: **~$160k**
 
 ## Spend
-| Initiative | Spend | Units |
-|---|---|---|
-| Community first aid & rescue training | $1,840,000 | 92 courses in 33 postcodes (62 beaches) |
-| Drone operator hours | $85,000 | 1,889 hrs at 19 beaches that already fly drones |
-| Education campaigns | $75,000 | 5 postcodes (11 beaches) |
-| Lifeguards, drone hardware, PA, flags | $0 | |
+| Initiative | Spend | Units | Avoided on its own |
+|---|---|---|---|
+| Drone flight hours | $908,255 | 20,183 hrs (9,935 at beaches with drones, 10,248 at new ones) | |
+| Drone hardware + operator training | $255,150 | 27 new drones | drones total 8.4 |
+| Casual lifeguards (winter patrols) | $391,595 | 6,752 hrs at 22 beaches, May–Aug, blocks of ≥ 97 hrs/month | 2.1 |
+| Education campaigns | $330,000 | 22 postcodes (42 beaches), Nov–Feb | 2.7 |
+| Rip-warning flags | $115,000 | 23 beaches | 2.1 |
+| Full-time lifeguards, first aid, PA | $0 | | |
 
-Avoided by each initiative on its own: first aid 12.1, campaigns 0.8, drones 0.6. Beaches touched by any initiative: 73 of 80. Top 10 beaches by gain: 37% of the avoided total. May–Aug: 34%.
+69 of 80 beaches funded. Top 10 beaches: 53% of the avoided total. May–Aug: 50%.
 
-Top beaches by avoided incidents: Terrigal, Maroubra, Palm Beach, Mollymook, Byron Bay (Main Beach), Shelly Beach (Manly), Wamberal, Dee Why, Wanda, Coogee.
+Top beaches by avoided incidents: North Wollongong, Seven Mile Beach (Lennox Head), Copacabana, Byron Bay (Main Beach), Kiama Surf Beach, Terrigal, Mollymook, Mona Vale, Bondi, Maroubra.
 
-## Issues to resolve before the semi-final
-1. **Lifeguard coefficient is positive** (+0.0005 per hour, p < 0.001), so the optimiser never buys lifeguards. The GLM has no visitor exposure, month or beach terms, so this is probably confounding (patrols go to busy beaches). It contradicts the Task 1 drivers slide and the Part 1 negative binomial model.
-2. **First aid does 96% of the work.** At −0.043 per capacity point, 4 courses (+40) multiply risk by ~0.18. That effect size needs defending in Q&A, or a check against the Part 1 model.
-3. **Baseline mismatch:** 19.3 here vs the FY2027 forecast of ≈ 21 (15–33) from Part 1.
-4. `mip_rel_gap` is not accepted by the HiGHS plugin (a warning), so the 1% gap setting has no effect.
-5. The alternatives (spread evenly, summer-only patrols, education only) are not computed by the Rmd; the slide still has `[__]` for them.
+## Alternatives (same model and baseline)
+| Option | Spend | Avoided | $ per avoided |
+|---|---|---|---|
+| Optimised plan | $2.0M | 12.5 | ~$160k |
+| Education only (every postcode that can use one) | $615k | 2.9 | ~$209k |
+| Spread evenly ($25k casual lifeguard hours per beach) | $2.0M | 3.0 | ~$656k |
+| Summer-only patrols (Nov–Feb, by visitors) | $1.93M | 0.3 | ~$5.6M |
+
+## Modelling choices to be able to defend
+1. **Log-gain formulation.** The decision variables are `log1p` gains, so the incident effect is linear in them. The hours they need are convex and are modelled with chord lines, so cost is never understated. `exp()` uses tangent lines, as before.
+2. **Minimum patrol block = 97 hrs/month** (5th percentile of patrolled months). Without it, `log1p` lets the solver spread 1–10 hour patrols over hundreds of unpatrolled months (median 8 hrs). The block costs only 0.3 avoided incidents (12.8 → 12.5).
+3. **First aid and PA are not bought**: their coefficients are at or above zero for severe incidents in the Part 1 model.
+4. **Drones dominate** (8.4 of 12.5) because `log_drone` is −0.26 and most beaches fly no drones; the first drone hours at a new beach count heavily. This is the main limitation to raise in Q&A ("the first drone hours may be optimistic").
+5. Effects are associations. Lifeguards and drones were probably placed where risk is high, so their effects may be understated.
