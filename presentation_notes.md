@@ -75,7 +75,7 @@ What we did at each step, why, the numbers to quote, and likely panel questions.
 **5. Beaches: big beaches have more incidents, but not only because they are big**
 - Total incidents per beach move with visitors (correlation 0.86; 0.72 for severe).
 - But incidents per 100k visits range from about 5 to 46 across beaches (median 13). Beaches with similar visitor numbers carry very different risk.
-- **Seven Mile Beach (Lennox Head) is the standout:** 22 severe incidents over ten years, the most of any beach, from only 4.2m visits. That is 0.52 severe per 100k visits, about 5 times Bondi, North Wollongong or Byron.
+- **Seven Mile Beach (Lennox Head) is the standout:** 22 severe incidents over ten years, the most of any beach, from only 4.2m visits. That is 0.52 severe per 100k visits, about 5 times North Wollongong or Byron and almost 8 times Bondi (0.07).
 - **Decision:** beach-level risk goes in the model, through measured traits (rips, rocks, shore length) or one effect per beach (step 05 tests both).
 
 **Likely Q&A**
