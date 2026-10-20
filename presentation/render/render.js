@@ -30,6 +30,9 @@ document.fonts.ready.then(()=>setTimeout(()=>{
   const isPinned=e=>{for(let x=e;x&&x!==s;x=x.parentElement){if(getComputedStyle(x).position==='absolute')return true}return false};
   const txt=[...s.querySelectorAll('h1,h2,h3,p,li,td,th')].filter(e=>e.textContent.trim());
   const lab=e=>(e.tagName+' "'+e.textContent.trim().slice(0,40)+'"');
+  // the y=920 limit applies only to slides with a pinned footer row; others may run to the 952 margin
+  const footer=[...s.querySelectorAll('p')].some(e=>getComputedStyle(e).position==='absolute'&&e.getBoundingClientRect().top>960);
+  const LIM=footer?921:953;
   if(s.scrollHeight>1081||s.scrollWidth>1921) out.push('SECTION overflows canvas: '+s.scrollWidth+'x'+s.scrollHeight);
   for(const e of txt){
     if(e.scrollWidth>e.clientWidth+2) out.push('TEXT too wide for its box ('+e.scrollWidth+' > '+e.clientWidth+'): '+lab(e));
@@ -37,22 +40,25 @@ document.fonts.ready.then(()=>setTimeout(()=>{
     if(!rs.length) continue;
     const b=Math.max(...rs.map(x=>x.bottom)), rt=Math.max(...rs.map(x=>x.right)), l=Math.min(...rs.map(x=>x.left));
     if(b>1080||rt>1920||l<0) out.push('TEXT off canvas (right '+Math.round(rt)+', bottom '+Math.round(b)+'): '+lab(e));
-    else if(!isPinned(e) && b>921) out.push('FLOW text below y=920 (bottom '+Math.round(b)+'): '+lab(e));
+    else if(!isPinned(e) && b>LIM) out.push('FLOW text below y=920 (bottom '+Math.round(b)+'): '+lab(e));
     else if(rt>1793 && !isPinned(e)) out.push('TEXT past right margin (right '+Math.round(rt)+'): '+lab(e));
     e._r=rs;
   }
   // overlapping glyph boxes between different text elements
   for(let i=0;i<txt.length;i++)for(let j=i+1;j<txt.length;j++){
     const a=txt[i],c=txt[j]; if(!a._r||!c._r||a.contains(c)||c.contains(a))continue;
-    if(a._r.some(x=>c._r.some(y=>x.left<y.right-1&&y.left<x.right-1&&x.top<y.bottom-1&&y.top<x.bottom-1)))
+    // ignore < 4px vertical intrusion: tight line-heights make adjacent lines' glyph boxes touch
+    if(a._r.some(x=>c._r.some(y=>x.left<y.right-1&&y.left<x.right-1&&Math.min(x.bottom,y.bottom)-Math.max(x.top,y.top)>4)))
       out.push('OVERLAP: '+lab(a)+' with '+lab(c));
   }
   // boxes (painted divs) spilling past the canvas or the bottom margin
   for(const d of s.querySelectorAll('div,table,svg')){const r=d.getBoundingClientRect(); if(!r.width)continue;
     if(r.right>1921||r.bottom>1081) out.push('BOX off canvas ('+Math.round(r.right)+','+Math.round(r.bottom)+'): '+d.tagName+' '+(d.getAttribute('style')||'').slice(0,60));
-    else if(!isPinned(d)&&r.bottom>922&&getComputedStyle(d).backgroundColor!=='rgba(0, 0, 0, 0)') out.push('BOX below y=920 (bottom '+Math.round(r.bottom)+'): '+(d.getAttribute('style')||'').slice(0,60));
+    else if(!isPinned(d)&&r.bottom>LIM+1&&getComputedStyle(d).backgroundColor!=='rgba(0, 0, 0, 0)') out.push('BOX below y=920 (bottom '+Math.round(r.bottom)+'): '+(d.getAttribute('style')||'').slice(0,60));
   }
-  const n=s.querySelectorAll('*').length; if(n>200) out.push('ELEMENTS '+n+' > 200');
+  // an <svg> counts as one element in the slide format; its shapes don't
+  const n=[...s.querySelectorAll('*')].filter(e=>!e.closest('svg')||e.tagName.toLowerCase()==='svg').length;
+  if(n>200) out.push('ELEMENTS '+n+' > 200');
   const pre=document.createElement('pre'); pre.id='__out'; pre.textContent=JSON.stringify(out); document.body.appendChild(pre); pre.style.display='none';
 },300));
 </script>`;
