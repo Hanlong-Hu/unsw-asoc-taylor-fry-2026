@@ -1,0 +1,24 @@
+<section id="model" data-transition="fade" style="background:#FFFFFF;color:#1F2A4D;font-family:Inter, Arial, sans-serif;padding:112px 128px 160px;display:flex;flex-direction:column;gap:48px">
+<div style="display:flex;flex-direction:column;gap:16px">
+<div style="width:96px;height:8px;background:#5D7BCC"></div>
+<p style="font-size:24px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#5D7BCC">Task 1 · Forecast</p>
+<h2 style="font-size:56px;font-weight:700;line-height:1.1;letter-spacing:-0.5px;color:#5D7BCC">Six inputs, one simple model per severity</h2>
+</div>
+<table style="font-family:Inter, Arial, sans-serif;font-size:28px;color:#1F2A4D">
+<tr style="background:#1F2A4D">
+<th style="width:22%;color:#FFFFFF;padding:16px 24px">Input</th>
+<th style="width:36%;color:#FFFFFF">How we used it</th>
+<th style="width:42%;color:#FFFFFF">Why</th>
+</tr>
+<tr><td><b>Visitors</b></td><td>Exposure: incidents scale with visits</td><td>More people in the water, more incidents</td></tr>
+<tr style="background:#EEF2FB"><td><b>Lifeguard hours</b></td><td>Effect with diminishing returns</td><td>The first hours of patrol do the most good</td></tr>
+<tr><td><b>Drone hours</b></td><td>Effect with diminishing returns</td><td>The same logic, applied to surveillance</td></tr>
+<tr style="background:#EEF2FB"><td><b>Month</b></td><td>Seasonal pattern</td><td>Rougher winter seas and fewer patrols</td></tr>
+<tr><td><b>Rips per km</b></td><td>Fixed hazard of each beach</td><td>Some beaches are dangerous all year</td></tr>
+<tr style="background:#EEF2FB"><td><b>Beach risk</b></td><td>Beach-specific adjustment</td><td>Picks up what the other inputs miss</td></tr>
+</table>
+<p style="font-size:28px;line-height:1.4;color:#6B7280">A negative binomial count model, fitted separately for mild incidents, close calls and severe incidents. Full specification in Appendix A1.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1200px;font-size:24px;color:#6B7280">Taylor Fryland beach safety · FY2027</p>
+<p style="position:absolute;right:128px;bottom:64px;width:200px;font-size:24px;color:#6B7280;text-align:right">7</p>
+<aside>~35 s. Keep it plain. Visitors set the baseline: more people, more incidents. Lifeguard and drone hours lower risk, with each extra hour doing a bit less than the last, which matters for Task 2. Month, rips and a beach adjustment capture the rest. One model per severity; detail in A1.</aside>
+</section>
