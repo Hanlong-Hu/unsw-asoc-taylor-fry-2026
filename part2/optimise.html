@@ -354,6 +354,14 @@ Part 1 severe model</h1>
 </div>
 
 
+<p>Plans the extra $2M against the severe-incident model chosen in Part
+1 (<code>M5_traits</code>, step 05). This is the single Task 2
+optimiser: it merges the earlier <code>optimise_m5traits.Rmd</code> into
+this file. <code>optimise_notes.md</code> explains what changed from the
+first version (a separate Poisson GLM) and why.</p>
+<p>Run <code>part1/06_forecast.Rmd</code> first: this file reads its
+hand-off, <code>part1/forecast_fy2027.rds</code>. Packages:
+<code>install.packages(c(&quot;ompr&quot;, &quot;ompr.roi&quot;, &quot;ROI&quot;, &quot;highs&quot;))</code>.</p>
 <pre class="r"><code>knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 root &lt;- rprojroot::find_root(rprojroot::has_dir(&quot;part1&quot;))   # project root, wherever this is run from
 knitr::opts_knit$set(root.dir = root)
@@ -367,6 +375,12 @@ library(ROI)
 select &lt;- dplyr::select   # MASS masks select()</code></pre>
 <div id="model-and-baseline-from-part-1" class="section level2">
 <h2>1. Model and baseline (from Part 1)</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> we start from Part 1’s forecast of
+next year (FY2027) if nothing changes: about 21 severe incidents. The
+model says how much each safety measure lowers the risk. Those effects
+are what the money gets spent against.</p>
+</blockquote>
 <p>The severe model is the Part 1 negative binomial
 (<code>06_forecast.Rmd</code>): visitors as an offset, month, weather,
 beach traits and the safety levers, with lifeguard and drone hours
@@ -379,10 +393,11 @@ every weather replay by the same factor:
 the replay-averaged forecast.</p>
 <pre class="r"><code>fy27      &lt;- readRDS(&quot;part1/forecast_fy2027.rds&quot;)
 glm_fit   &lt;- fy27$final$sev
+m_cc      &lt;- fy27$final$cc     # same predictors; used only to report the knock-on effect on close calls
 panel_f   &lt;- readRDS(&quot;part1/panel_f.rds&quot;)
 
 win &lt;- fy27$newdata %&gt;%
-  left_join(fy27$forecast %&gt;% select(beach_nm, mon, mu0 = mu_sev), by = c(&quot;beach_nm&quot;, &quot;mon&quot;)) %&gt;%
+  left_join(fy27$forecast %&gt;% select(beach_nm, mon, mu0 = mu_sev, mu0_cc = mu_cc), by = c(&quot;beach_nm&quot;, &quot;mon&quot;)) %&gt;%
   arrange(beach_nm, month_date)
 stopifnot(nrow(win) == 960, !anyNA(win$mu0))
 
@@ -390,14 +405,66 @@ b    &lt;- coef(glm_fit)
 b_lg &lt;- b[[&quot;log_lg&quot;]];       b_dr &lt;- b[[&quot;log_drone&quot;]]
 b_c  &lt;- b[[&quot;campaign_idx&quot;]]; b_fa &lt;- b[[&quot;first_aid_cap&quot;]]
 b_pa &lt;- b[[&quot;pa_system&quot;]];    b_fl &lt;- b[[&quot;flags&quot;]]
-print(round(summary(glm_fit)$coefficients[c(&quot;log_lg&quot;, &quot;log_drone&quot;, &quot;campaign_idx&quot;, &quot;first_aid_cap&quot;, &quot;pa_system&quot;, &quot;flags&quot;), ], 4))</code></pre>
-<pre><code>##               Estimate Std. Error z value Pr(&gt;|z|)
-## log_lg         -0.1515     0.0353 -4.2858   0.0000
-## log_drone      -0.2610     0.0479 -5.4458   0.0000
-## campaign_idx   -1.4299     0.4134 -3.4590   0.0005
-## first_aid_cap   0.0026     0.0075  0.3496   0.7267
-## pa_system       0.0314     0.1723  0.1825   0.8552
-## flags          -0.4503     0.1963 -2.2946   0.0218</code></pre>
+lev_names &lt;- c(&quot;log_lg&quot;, &quot;log_drone&quot;, &quot;campaign_idx&quot;, &quot;first_aid_cap&quot;, &quot;pa_system&quot;, &quot;flags&quot;)
+knitr::kable(cbind(coef = b[lev_names], RR = exp(b[lev_names]), exp(confint.default(glm_fit)[lev_names, ])), digits = 3,
+             caption = &quot;Safety levers in the severe model (RR &lt; 1 = protective)&quot;)</code></pre>
+<table>
+<caption>Safety levers in the severe model (RR &lt; 1 =
+protective)</caption>
+<thead>
+<tr class="header">
+<th align="left"></th>
+<th align="right">coef</th>
+<th align="right">RR</th>
+<th align="right">2.5 %</th>
+<th align="right">97.5 %</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">log_lg</td>
+<td align="right">-0.151</td>
+<td align="right">0.859</td>
+<td align="right">0.802</td>
+<td align="right">0.921</td>
+</tr>
+<tr class="even">
+<td align="left">log_drone</td>
+<td align="right">-0.261</td>
+<td align="right">0.770</td>
+<td align="right">0.701</td>
+<td align="right">0.846</td>
+</tr>
+<tr class="odd">
+<td align="left">campaign_idx</td>
+<td align="right">-1.430</td>
+<td align="right">0.239</td>
+<td align="right">0.106</td>
+<td align="right">0.538</td>
+</tr>
+<tr class="even">
+<td align="left">first_aid_cap</td>
+<td align="right">0.003</td>
+<td align="right">1.003</td>
+<td align="right">0.988</td>
+<td align="right">1.017</td>
+</tr>
+<tr class="odd">
+<td align="left">pa_system</td>
+<td align="right">0.031</td>
+<td align="right">1.032</td>
+<td align="right">0.736</td>
+<td align="right">1.447</td>
+</tr>
+<tr class="even">
+<td align="left">flags</td>
+<td align="right">-0.450</td>
+<td align="right">0.637</td>
+<td align="right">0.434</td>
+<td align="right">0.936</td>
+</tr>
+</tbody>
+</table>
 <pre class="r"><code># A lever with a coefficient &gt;= 0 does nothing for severe incidents, so it is left out.
 levers &lt;- c(log_lg = b_lg, log_drone = b_dr, campaign_idx = b_c, first_aid_cap = b_fa, pa_system = b_pa, flags = b_fl)
 cat(&quot;Not bought (coefficient &gt;= 0):&quot;, paste(names(levers)[levers &gt;= 0], collapse = &quot;, &quot;), &quot;\n&quot;)</code></pre>
@@ -417,6 +484,13 @@ cat(&quot;Planning year:&quot;, format(min(win$month_date), &quot;%b %Y&quot;), 
 </div>
 <div id="prices-and-settings" class="section level2">
 <h2>2. Prices and settings</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> what each item costs, plus the
+practical rules we impose: no more lifeguard hours at a beach than the
+busiest beach-month has ever had, one drone flies at most 120 hours a
+month, and a new patrol at a beach-month with none is a real roster
+(section 3), not a single hour.</p>
+</blockquote>
 <pre class="r"><code>prices &lt;- read.csv(&quot;part1/pricing.csv&quot;)
 price  &lt;- function(x) prices$cost_fd[match(x, prices$item)]
 
@@ -442,6 +516,11 @@ stopifnot(!anyNA(c(c_lg, c_fte, c_dr_hr, c_dr_buy, c_camp, c_fl)))</code></pre>
 </div>
 <div id="precompute-what-each-purchase-can-change" class="section level2">
 <h2>3. Precompute what each purchase can change</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> for every beach and month, work out
+the most each measure could add (how many more hours fit, whether flags
+are already up, and so on) and how much risk that would remove.</p>
+</blockquote>
 <p>Lifeguard and drone hours enter as <code>log1p</code>, so the
 decision variables are the <strong>log-gains</strong>
 <code>tl = log1p(lg0 + x) - log1p(lg0)</code> (and <code>td</code> for
@@ -515,6 +594,13 @@ have_act  &lt;- as.numeric(tapply(isact, win$b, max) &gt; 0)</code></pre>
 </div>
 <div id="the-milp" class="section level2">
 <h2>4. The MILP</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> a solver searches every affordable
+mix of purchases for the one with the fewest expected severe incidents
+within the $2M. The model’s curves are replaced by straight-line pieces
+so the solver can handle them; section 5 re-checks the answer with the
+exact curves.</p>
+</blockquote>
 <pre class="r"><code>model &lt;- MIPModel() %&gt;%
   # row-level (beach-month) variables
   add_variable(tl[r],  r = act, type = &quot;continuous&quot;, lb = 0) %&gt;%   # log-gain from extra lifeguard hours
@@ -584,6 +670,12 @@ cat(&quot;Solver status:&quot;, res$status, &quot;|&quot;, hs$status_message, &q
 </div>
 <div id="results-recomputed-exactly-from-the-part-1-model" class="section level2">
 <h2>5. Results (recomputed exactly from the Part 1 model)</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> take the solver’s shopping list, put
+it back into the real model (no straight-line shortcuts), and count how
+many severe incidents it avoids next year, what it costs, and where the
+money goes.</p>
+</blockquote>
 <p>The effect is recomputed from the hours actually bought, not from the
 solver’s log-gains, so it is exact and matches the cost.</p>
 <pre class="r"><code>fill_rows &lt;- function(df) { v &lt;- numeric(N); v[df$r] &lt;- df$value; v }
@@ -623,18 +715,87 @@ cat(sprintf(&quot;Spent %s of %s\n&quot;, format(round(sum(cost)), big.mark = &q
 <pre><code>## Expected severe incidents: 21.4 -&gt; 9.0  (12.5 avoided, 58.2%)</code></pre>
 <pre class="r"><code>cat(sprintf(&quot;Cost per severe incident avoided: $%s\n&quot;, format(round(sum(cost) / avoided, -3), big.mark = &quot;,&quot;)))</code></pre>
 <pre><code>## Cost per severe incident avoided: $160,000</code></pre>
-<pre class="r"><code>cat(sprintf(&quot;MILP objective (tangent approximation, a lower bound on incidents): %.1f\n&quot;,
+<pre class="r"><code># Close calls are not optimised for; the same purchases lower them too (Part 1 close-call model)
+win$mu_new_cc &lt;- win$mu0_cc * exp(plan_delta(lg_add, dh_v, flag_v, camp_v, coef(m_cc)))
+cat(sprintf(&quot;Expected close calls (knock-on): %.1f -&gt; %.1f\n&quot;, sum(win$mu0_cc), sum(win$mu_new_cc)))</code></pre>
+<pre><code>## Expected close calls (knock-on): 316.3 -&gt; 169.1</code></pre>
+<pre class="r"><code>cat(sprintf(&quot;MILP objective (approximation, a guide only): %.1f\n&quot;,
             sum(get_solution(res, z[r])$value) + sum(win$mu0[-act])))</code></pre>
-<pre><code>## MILP objective (tangent approximation, a lower bound on incidents): 8.9</code></pre>
+<pre><code>## MILP objective (approximation, a guide only): 8.9</code></pre>
 <pre class="r"><code>print(round(cost))</code></pre>
 <pre><code>##       casual_lifeguards    full_time_lifeguards             drone_hours 
 ##                  391595                       0                  908255 
 ## drone_hardware_training               campaigns                   flags 
 ##                  255150                  330000                  115000</code></pre>
-<pre class="r"><code>by_beach &lt;- tibble(
+<div id="which-purchases-do-the-work" class="section level3">
+<h3>Which purchases do the work</h3>
+<blockquote>
+<p><strong>In plain terms:</strong> the saving from each type of
+purchase on its own, with everything else switched off. The lines need
+not add up to the total, because the effects multiply.</p>
+</blockquote>
+<pre class="r"><code>none_b &lt;- rep(0, B); none_p &lt;- rep(0, P)
+attr_tab &lt;- tibble(
+  lever = c(&quot;Lifeguards&quot;, &quot;Drones&quot;, &quot;Campaigns&quot;, &quot;Flags/signage&quot;),
+  spend = c(sum(cost[c(&quot;casual_lifeguards&quot;, &quot;full_time_lifeguards&quot;)]),
+            sum(cost[c(&quot;drone_hours&quot;, &quot;drone_hardware_training&quot;)]), cost[[&quot;campaigns&quot;]], cost[[&quot;flags&quot;]]),
+  severe_avoided_alone = c(
+    baseline_total - sum(win$mu0 * exp(plan_delta(lg_add, 0, none_b, none_p))),
+    baseline_total - sum(win$mu0 * exp(plan_delta(0, dh_v, none_b, none_p))),
+    baseline_total - sum(win$mu0 * exp(plan_delta(0, 0, none_b, camp_v))),
+    baseline_total - sum(win$mu0 * exp(plan_delta(0, 0, flag_v, none_p))))
+) %&gt;% mutate(cost_per_incident = ifelse(severe_avoided_alone &gt; 0, spend / severe_avoided_alone, NA))
+knitr::kable(attr_tab, digits = c(0, 0, 2, 0))</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">lever</th>
+<th align="right">spend</th>
+<th align="right">severe_avoided_alone</th>
+<th align="right">cost_per_incident</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">Lifeguards</td>
+<td align="right">391595</td>
+<td align="right">2.14</td>
+<td align="right">183088</td>
+</tr>
+<tr class="even">
+<td align="left">Drones</td>
+<td align="right">1163405</td>
+<td align="right">8.42</td>
+<td align="right">138157</td>
+</tr>
+<tr class="odd">
+<td align="left">Campaigns</td>
+<td align="right">330000</td>
+<td align="right">2.74</td>
+<td align="right">120617</td>
+</tr>
+<tr class="even">
+<td align="left">Flags/signage</td>
+<td align="right">115000</td>
+<td align="right">2.10</td>
+<td align="right">54713</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="allocation" class="section level3">
+<h3>Allocation</h3>
+<blockquote>
+<p><strong>In plain terms:</strong> the shopping list by beach and by
+postcode, with each beach’s expected severe incidents before and after,
+and the plan month by month.</p>
+</blockquote>
+<pre class="r"><code>mon_lab &lt;- function(rows) paste(month.abb[win$cal[rows]], collapse = &quot; &quot;)
+by_beach &lt;- tibble(
   beach = beach_ids,
   postcode = win %&gt;% group_by(b) %&gt;% summarise(p = first(postcode)) %&gt;% pull(p),
   casual_lg_hrs = as.numeric(tapply(cas_v, bi, sum)),
+  casual_months = sapply(seq_len(B), function(i) mon_lab(which(bi == i &amp; cas_v &gt; 0.5))),
   fte = fte_v, drone_bought = ydr_v, drone_hrs = as.numeric(tapply(dh_v, bi, sum)),
   flags = flag_v,
   winter_lg_hrs = as.numeric(tapply(lg_add * (win$cal %in% 5:8), bi, sum)),
@@ -648,21 +809,23 @@ cat(sprintf(&quot;Spent %s of %s\n&quot;, format(round(sum(cost)), big.mark = &q
 by_postcode &lt;- tibble(postcode = pc_ids, campaign = camp_v) %&gt;% filter(campaign &gt; 0)
 
 by_month &lt;- win %&gt;% mutate(lg_add = lg_add, dh = dh_v) %&gt;% group_by(cal) %&gt;%
-  summarise(extra_lg_hrs = sum(lg_add), extra_drone_hrs = sum(dh), avoided = sum(mu0 - mu_new))
+  summarise(before = sum(mu0), after = sum(mu_new), extra_lg_hrs = sum(lg_add), extra_drone_hrs = sum(dh),
+            avoided = sum(mu0 - mu_new))
 
 knitr::kable(by_beach, digits = 2)</code></pre>
-<table style="width:100%;">
+<table>
 <colgroup>
-<col width="22%" />
-<col width="6%" />
-<col width="10%" />
+<col width="19%" />
+<col width="5%" />
+<col width="8%" />
+<col width="12%" />
 <col width="2%" />
+<col width="8%" />
+<col width="6%" />
+<col width="3%" />
+<col width="8%" />
+<col width="10%" />
 <col width="9%" />
-<col width="7%" />
-<col width="4%" />
-<col width="10%" />
-<col width="11%" />
-<col width="10%" />
 <col width="5%" />
 </colgroup>
 <thead>
@@ -670,6 +833,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <th align="left">beach</th>
 <th align="right">postcode</th>
 <th align="right">casual_lg_hrs</th>
+<th align="left">casual_months</th>
 <th align="right">fte</th>
 <th align="right">drone_bought</th>
 <th align="right">drone_hrs</th>
@@ -685,6 +849,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">North Wollongong Beach</td>
 <td align="right">2500</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">1416.00</td>
@@ -698,6 +863,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Seven Mile Beach (Lennox Head)</td>
 <td align="right">2478</td>
 <td align="right">453.78</td>
+<td align="left">Sep May Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">597.30</td>
@@ -711,6 +877,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Copacabana Beach</td>
 <td align="right">2251</td>
 <td align="right">387.56</td>
+<td align="left">May Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">974.62</td>
@@ -724,6 +891,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Byron Bay (Main Beach)</td>
 <td align="right">2481</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">740.10</td>
@@ -737,6 +905,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Kiama Surf Beach</td>
 <td align="right">2533</td>
 <td align="right">387.56</td>
+<td align="left">May Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">656.15</td>
@@ -750,6 +919,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Terrigal Beach</td>
 <td align="right">2260</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">749.90</td>
@@ -763,6 +933,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Mollymook Beach</td>
 <td align="right">2539</td>
 <td align="right">387.56</td>
+<td align="left">May Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">615.01</td>
@@ -776,6 +947,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Mona Vale Beach</td>
 <td align="right">2103</td>
 <td align="right">290.67</td>
+<td align="left">Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">391.98</td>
@@ -789,6 +961,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Bondi Beach</td>
 <td align="right">2026</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">636.10</td>
@@ -802,6 +975,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Maroubra Beach</td>
 <td align="right">2035</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">687.50</td>
@@ -815,6 +989,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Palm Beach</td>
 <td align="right">2108</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">572.40</td>
@@ -828,6 +1003,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Narrabeen Beach</td>
 <td align="right">2101</td>
 <td align="right">387.56</td>
+<td align="left">May Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">553.28</td>
@@ -841,6 +1017,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Tathra Beach</td>
 <td align="right">2550</td>
 <td align="right">387.56</td>
+<td align="left">May Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">447.90</td>
@@ -854,6 +1031,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Dee Why Beach</td>
 <td align="right">2099</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">596.20</td>
@@ -867,6 +1045,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Wamberal Beach</td>
 <td align="right">2260</td>
 <td align="right">96.89</td>
+<td align="left">Mar</td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">426.29</td>
@@ -880,6 +1059,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Woonona Beach</td>
 <td align="right">2517</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">339.23</td>
@@ -893,6 +1073,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Town Beach (Port Macquarie)</td>
 <td align="right">2444</td>
 <td align="right">290.67</td>
+<td align="left">May Jun Jul</td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">472.76</td>
@@ -906,6 +1087,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Bar Beach</td>
 <td align="right">2291</td>
 <td align="right">96.89</td>
+<td align="left">May</td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">386.00</td>
@@ -919,6 +1101,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Lighthouse Beach (Ballina)</td>
 <td align="right">2478</td>
 <td align="right">387.56</td>
+<td align="left">May Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">410.90</td>
@@ -932,6 +1115,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Newcastle Beach</td>
 <td align="right">2300</td>
 <td align="right">387.56</td>
+<td align="left">May Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">192.00</td>
@@ -945,6 +1129,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Cronulla Beach</td>
 <td align="right">2230</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">570.00</td>
@@ -958,6 +1143,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Aslings Beach (Eden)</td>
 <td align="right">2551</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">355.55</td>
@@ -971,6 +1157,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Coogee Beach</td>
 <td align="right">2034</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">640.00</td>
@@ -984,6 +1171,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Flynns Beach</td>
 <td align="right">2444</td>
 <td align="right">387.56</td>
+<td align="left">May Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">308.55</td>
@@ -997,6 +1185,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">North Cronulla Beach</td>
 <td align="right">2230</td>
 <td align="right">387.56</td>
+<td align="left">May Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">290.07</td>
@@ -1010,6 +1199,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Wollongong City Beach</td>
 <td align="right">2500</td>
 <td align="right">387.56</td>
+<td align="left">May Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">324.53</td>
@@ -1023,6 +1213,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Clarkes Beach</td>
 <td align="right">2481</td>
 <td align="right">96.89</td>
+<td align="left">Jun</td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">357.14</td>
@@ -1036,6 +1227,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Shelly Beach (Manly)</td>
 <td align="right">2095</td>
 <td align="right">193.78</td>
+<td align="left">May Jun</td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">365.35</td>
@@ -1049,6 +1241,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Diggers Beach</td>
 <td align="right">2450</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">184.00</td>
@@ -1062,6 +1255,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Avoca Beach</td>
 <td align="right">2251</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">150.03</td>
@@ -1075,6 +1269,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Park Beach (Coffs Harbour)</td>
 <td align="right">2450</td>
 <td align="right">387.56</td>
+<td align="left">May Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">160.00</td>
@@ -1088,6 +1283,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Bulli Beach</td>
 <td align="right">2516</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">391.70</td>
@@ -1101,6 +1297,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Manly Beach</td>
 <td align="right">2095</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">590.84</td>
@@ -1114,6 +1311,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Merimbula Main Beach</td>
 <td align="right">2548</td>
 <td align="right">96.89</td>
+<td align="left">May</td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">151.61</td>
@@ -1127,6 +1325,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Curl Curl Beach</td>
 <td align="right">2096</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">278.73</td>
@@ -1140,6 +1339,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Werri Beach</td>
 <td align="right">2534</td>
 <td align="right">387.56</td>
+<td align="left">May Jun Jul Aug</td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">221.01</td>
@@ -1153,6 +1353,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Collaroy Beach</td>
 <td align="right">2097</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">309.40</td>
@@ -1166,6 +1367,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Angourie Beach</td>
 <td align="right">2464</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">181.69</td>
@@ -1179,6 +1381,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">North Narrabeen Beach</td>
 <td align="right">2101</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">168.45</td>
@@ -1192,6 +1395,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Hyams Beach</td>
 <td align="right">2540</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">159.66</td>
@@ -1205,6 +1409,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">The Entrance Beach</td>
 <td align="right">2261</td>
 <td align="right">290.67</td>
+<td align="left">May Jun Aug</td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">160.00</td>
@@ -1218,6 +1423,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Elouera Beach</td>
 <td align="right">2230</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">208.00</td>
@@ -1231,6 +1437,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Rennies Beach (Ulladulla)</td>
 <td align="right">2539</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">0.00</td>
@@ -1244,6 +1451,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Collingwood Beach (Huskisson)</td>
 <td align="right">2540</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">0.00</td>
@@ -1257,6 +1465,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Austinmer Beach</td>
 <td align="right">2515</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">106.89</td>
@@ -1270,6 +1479,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Wanda Beach</td>
 <td align="right">2230</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">194.30</td>
@@ -1283,6 +1493,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Thirroul Beach</td>
 <td align="right">2515</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">213.57</td>
@@ -1296,6 +1507,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Newport Beach</td>
 <td align="right">2106</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">189.07</td>
@@ -1309,6 +1521,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Malua Bay Beach</td>
 <td align="right">2536</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">198.27</td>
@@ -1322,6 +1535,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Shelly Beach (Ballina)</td>
 <td align="right">2478</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">0.00</td>
@@ -1335,6 +1549,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Tamarama Beach</td>
 <td align="right">2026</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">135.37</td>
@@ -1348,6 +1563,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Broulee Beach</td>
 <td align="right">2537</td>
 <td align="right">96.89</td>
+<td align="left">Jul</td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">90.37</td>
@@ -1361,6 +1577,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Little Bay</td>
 <td align="right">2036</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">0.00</td>
@@ -1374,6 +1591,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Horseshoe Bay (Bermagui)</td>
 <td align="right">2546</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">1</td>
 <td align="right">126.71</td>
@@ -1387,6 +1605,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Narrawallee Beach</td>
 <td align="right">2539</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">16.00</td>
@@ -1400,6 +1619,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">MacMasters Beach</td>
 <td align="right">2251</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">0.00</td>
@@ -1413,6 +1633,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Port Kembla Beach</td>
 <td align="right">2505</td>
 <td align="right">96.89</td>
+<td align="left">Jul</td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">147.06</td>
@@ -1426,6 +1647,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Garie Beach</td>
 <td align="right">2233</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">0.00</td>
@@ -1439,6 +1661,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Malabar Beach</td>
 <td align="right">2036</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">0.00</td>
@@ -1452,6 +1675,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Bronte Beach</td>
 <td align="right">2024</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">0.00</td>
@@ -1465,6 +1689,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Redhead Beach</td>
 <td align="right">2290</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">0.00</td>
@@ -1478,6 +1703,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Sawtell Beach</td>
 <td align="right">2452</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">117.64</td>
@@ -1491,6 +1717,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Queenscliff Beach</td>
 <td align="right">2096</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">62.54</td>
@@ -1504,6 +1731,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Warriewood Beach</td>
 <td align="right">2102</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">0.00</td>
@@ -1517,6 +1745,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Culburra Beach</td>
 <td align="right">2540</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">23.90</td>
@@ -1530,6 +1759,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Merewether Beach</td>
 <td align="right">2291</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">36.00</td>
@@ -1543,6 +1773,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Yamba Main Beach</td>
 <td align="right">2464</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">88.00</td>
@@ -1556,6 +1787,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Woolgoolga Beach</td>
 <td align="right">2456</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">45.88</td>
@@ -1569,6 +1801,7 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <td align="left">Toowoon Bay Beach</td>
 <td align="right">2261</td>
 <td align="right">0.00</td>
+<td align="left"></td>
 <td align="right">0</td>
 <td align="right">0</td>
 <td align="right">4.00</td>
@@ -1600,6 +1833,8 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <thead>
 <tr class="header">
 <th align="right">cal</th>
+<th align="right">before</th>
+<th align="right">after</th>
 <th align="right">extra_lg_hrs</th>
 <th align="right">extra_drone_hrs</th>
 <th align="right">avoided</th>
@@ -1608,72 +1843,96 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <tbody>
 <tr class="odd">
 <td align="right">1</td>
+<td align="right">2.5</td>
+<td align="right">0.9</td>
 <td align="right">0.0</td>
 <td align="right">1258.1</td>
 <td align="right">1.6</td>
 </tr>
 <tr class="even">
 <td align="right">2</td>
+<td align="right">1.4</td>
+<td align="right">0.5</td>
 <td align="right">0.0</td>
 <td align="right">816.2</td>
 <td align="right">0.9</td>
 </tr>
 <tr class="odd">
 <td align="right">3</td>
+<td align="right">1.7</td>
+<td align="right">1.0</td>
 <td align="right">96.9</td>
 <td align="right">1327.2</td>
 <td align="right">0.7</td>
 </tr>
 <tr class="even">
 <td align="right">4</td>
+<td align="right">1.6</td>
+<td align="right">1.0</td>
 <td align="right">0.0</td>
 <td align="right">1269.9</td>
 <td align="right">0.6</td>
 </tr>
 <tr class="odd">
 <td align="right">5</td>
+<td align="right">2.7</td>
+<td align="right">0.9</td>
 <td align="right">1775.1</td>
 <td align="right">3256.0</td>
 <td align="right">1.8</td>
 </tr>
 <tr class="even">
 <td align="right">6</td>
+<td align="right">2.9</td>
+<td align="right">0.9</td>
 <td align="right">1775.1</td>
 <td align="right">3347.7</td>
 <td align="right">2.0</td>
 </tr>
 <tr class="odd">
 <td align="right">7</td>
+<td align="right">1.9</td>
+<td align="right">0.7</td>
 <td align="right">1647.1</td>
 <td align="right">2673.5</td>
 <td align="right">1.2</td>
 </tr>
 <tr class="even">
 <td align="right">8</td>
+<td align="right">1.9</td>
+<td align="right">0.7</td>
 <td align="right">1453.4</td>
 <td align="right">2743.2</td>
 <td align="right">1.2</td>
 </tr>
 <tr class="odd">
 <td align="right">9</td>
+<td align="right">1.4</td>
+<td align="right">0.9</td>
 <td align="right">4.0</td>
 <td align="right">1211.6</td>
 <td align="right">0.6</td>
 </tr>
 <tr class="even">
 <td align="right">10</td>
+<td align="right">0.6</td>
+<td align="right">0.4</td>
 <td align="right">0.0</td>
 <td align="right">693.8</td>
 <td align="right">0.2</td>
 </tr>
 <tr class="odd">
 <td align="right">11</td>
+<td align="right">0.9</td>
+<td align="right">0.4</td>
 <td align="right">0.0</td>
 <td align="right">600.5</td>
 <td align="right">0.6</td>
 </tr>
 <tr class="even">
 <td align="right">12</td>
+<td align="right">1.8</td>
+<td align="right">0.7</td>
 <td align="right">0.0</td>
 <td align="right">985.5</td>
 <td align="right">1.1</td>
@@ -1687,8 +1946,15 @@ knitr::kable(by_beach, digits = 2)</code></pre>
 <pre class="r"><code>write.csv(by_beach, &quot;part2/optimal_allocation_by_beach.csv&quot;, row.names = FALSE)
 write.csv(by_postcode, &quot;part2/optimal_allocation_by_postcode.csv&quot;, row.names = FALSE)</code></pre>
 </div>
+</div>
 <div id="uncertainty" class="section level2">
 <h2>6. Uncertainty</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> the effect sizes, the weather and
+the year’s luck are all uncertain. We simulate 5,000 possible years with
+and without the plan, which gives a range instead of a single
+number.</p>
+</blockquote>
 <p>Same three sources as Part 1 section 5: weather (one past year for
 the whole coast), parameters (<code>mvrnorm(coef, vcov)</code>) and
 chance (negative binomial draws). The allocation is held fixed; each
@@ -1783,6 +2049,10 @@ knitr::kable(alts, digits = c(0, 0, 2, 0))</code></pre>
 </div>
 <div id="notes" class="section level2">
 <h2>8. Notes</h2>
+<p>See <code>optimise_notes.md</code> for the full write-up (what was
+wrong with the first version, the differences in approach, sensitivity
+checks and open questions) and <code>presentation_notes.md</code> §07–08
+for the robustness checks.</p>
 <ul>
 <li>First aid capacity and PA systems have coefficients at or above zero
 for severe incidents in the Part 1 model, so the optimiser does not buy
