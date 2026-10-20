@@ -18,3 +18,5 @@ timeline_plan.md
 
 # Robustness scratch outputs
 part2/robustness/out/
+# Slide render output
+presentation/render/out/
