@@ -75,7 +75,7 @@ What we did at each step, why, the numbers to quote, and likely panel questions.
 **5. Beaches: big beaches have more incidents, but not only because they are big**
 - Total incidents per beach move with visitors (correlation 0.86; 0.72 for severe).
 - But incidents per 100k visits range from about 5 to 46 across beaches (median 13). Beaches with similar visitor numbers carry very different risk.
-- **Seven Mile Beach (Lennox Head) is the standout:** 22 severe incidents over ten years, the most of any beach, from only 4.2m visits. That is 0.52 severe per 100k visits, about 5 times Bondi, North Wollongong or Byron.
+- **Seven Mile Beach (Lennox Head) is the standout:** 22 severe incidents over ten years, the most of any beach, from only 4.2m visits. That is 0.52 severe per 100k visits, about 5 times North Wollongong or Byron and almost 8 times Bondi (0.07).
 - **Decision:** beach-level risk goes in the model, through measured traits (rips, rocks, shore length) or one effect per beach (step 05 tests both).
 
 **Likely Q&A**
@@ -158,3 +158,109 @@ Pairs that move together share credit and make effects unstable, so we kept one 
 - **Why so few variables?** Every predictor has to be explainable to a non-technical panel, and near-duplicates make effects unstable without improving forecasts.
 
 **On a slide:** a three-column table (input → transformation → why), e.g. "Lifeguard hours → log(1 + hours) → diminishing returns; many zeros".
+
+---
+
+# Presentation notes: Task 2 (allocating the extra $2M)
+
+Source: `part2/optimise.Rmd` (the optimiser) and `part2/robustness/` (the checks below). Detailed run log in `presentation/optimise_results.md`.
+
+## 07 The optimiser: where the $2M goes
+
+**In one sentence:** we used the Task 1 severe model to work out how much each initiative cuts expected severe incidents at each beach in each month, priced every option, and let an optimiser pick the mix that avoids the most severe incidents within $2M.
+
+**What we did**
+1. **Baseline:** the Task 1 FY2027 forecast, **21.4 expected severe incidents** (safety at FY2026 levels, weather replayed over 10 years).
+2. **Levers:** only those with a price and a protective effect on severe incidents in the Task 1 model.
+
+| Lever | Task 1 effect (severe) | Price | What one purchase does |
+|---|---|---|---|
+| Lifeguard hours | −0.15 per log-hour | $58/hr casual, $80,500/yr full-time | more patrol hours in a beach-month |
+| Drone hours | −0.26 per log-hour | $45/hr, plus $9,450 for a new drone and trained operator | up to 120 flight hrs/month per drone |
+| Education campaign | −1.43 per index point | $15,000 per postcode | raises the campaign index to 0.7 in Nov–Feb |
+| Rip-warning flags | −0.45 | $5,000 per beach | flags at a beach that has none |
+| First aid, PA system | about zero (+0.003, +0.03) | | **not bought**: no effect on severe incidents |
+
+3. **Optimiser:** a mixed-integer program (HiGHS solver). It chooses extra hours per beach-month, new drones, flags and campaigns to **minimise expected severe incidents**, subject to:
+   - total cost ≤ $2M;
+   - lifeguard hours no higher than the most ever seen in a month (3,498);
+   - **a new patrol is at least 97 hours a month**, the size of the smallest patrols actually run (5th percentile). Without this, the model spreads 1–10 hour patrols across hundreds of months, which nobody could roster.
+4. **Checked exactly:** after solving, the effect is recomputed from the Task 1 model using the hours actually bought. The solver finished within 0.6% of the best possible plan.
+
+**The answer**
+
+| Initiative | Spend | What it buys | Avoided on its own |
+|---|---|---|---|
+| Drones | $1.16M (58%) | 27 new drones + 20,183 extra flight hours | 8.4 |
+| Winter lifeguard patrols | $392k (20%) | 6,752 casual hours at 22 beaches, May–Aug | 2.1 |
+| Education campaigns | $330k (17%) | 22 postcodes (42 beaches), summer | 2.7 |
+| Rip flags | $115k (6%) | 23 beaches | 2.1 |
+
+(The "on its own" column adds to more than 12.5 because effects multiply: two levers at the same beach-month overlap.)
+
+**Numbers to quote**
+- **21.4 → 9.0 expected severe incidents: about 12.5 avoided a year (90% range 11–16), down 58%.**
+- About **$160k per severe incident avoided**.
+- 9 years in 10 with the plan see **4–16** severe incidents, against 15–33 without it.
+- 69 of 80 beaches get something. The **top 10 beaches take 53%** of the gain, and **May–Aug 50%**.
+- Top beaches: North Wollongong, Seven Mile Beach (Lennox Head), Copacabana, Byron Bay, Kiama, Terrigal, Mollymook, Mona Vale.
+
+**The alternatives (same model, same baseline)**
+
+| Option | Spend | Avoided | $ per avoided |
+|---|---|---|---|
+| **Our plan** | $2.0M | **12.5** | **~$160k** |
+| Education only (every postcode that can use one) | $615k | 2.9 | ~$209k |
+| Spread evenly ($25k of lifeguard hours per beach) | $2.0M | 3.0 | ~$656k |
+| Summer-only patrols (Nov–Feb, by visitors) | $1.93M | 0.3 | ~$5.6M |
+
+- Spreading evenly ignores where and when the risk is. Summer patrols follow the crowds, not the risk: summer beaches are already patrolled, so extra hours there add little. Education is good value but runs out at $615k.
+
+**Why the earlier draft said "first aid"**: the first version of `optimise.Rmd` used its own Poisson model with no visitors, month or beach terms. In that model busy beaches looked both well patrolled and dangerous, so lifeguards came out *harmful* and first aid got 92% of the money. Switching to the Task 1 model fixed both. If asked: "we made sure Task 2 uses exactly the model we validated in Task 1."
+
+## 08 Does it hold up? Robustness checks
+
+**Verdict:** **the recommendation is robust; the size of the effect is less certain.** Under every alternative we tried, our plan still achieves **94–99% of the best plan for that alternative**, and avoids **8–13 severe incidents a year**. Drones and campaigns pass every check. Lifeguards and flags (25% of the budget) are the weakest part.
+
+**The checks** (scripts in `part2/robustness/`)
+
+| # | Check | What we did | Result | Verdict |
+|---|---|---|---|---|
+| 1 | Stable over time? | Refitted the severe model 15 times: on each rolling training window, and leaving out each year | Drones −0.23 to −0.31, lifeguards −0.13 to −0.18, campaigns −1.28 to −1.68, flags −0.32 to −0.58. No sign flips | ✅ all levers |
+| 2 | Holds *within* a beach? | Beach fixed effects instead of beach traits (compares each beach with itself) | Drones **−0.29** (p < 0.001), campaigns **−1.41** (p < 0.001). Lifeguards −0.07 (not significant), flags +0.50 (not significant) | ✅ drones, campaigns · ⚠️ lifeguards, flags |
+| 3 | Same story for close calls + severe? | Same models on the larger "serious" count (≈ 350 a year, not 22) | Drones −0.23 / −0.27 (z ≈ −17), campaigns −1.69 / −1.58 | ✅ drones, campaigns |
+| 4 | Do the levers improve forecasts? | Rolling-origin test, FY2022–26: drop each term and compare the log score | Dropping drones costs **13.0** log-score points, lifeguards 4.9, all safety terms 20.0 | ✅ drones clearly, lifeguards somewhat |
+| 5 | Is `log1p` driving it? | Refit drones as square root, straight line, or on/off plus log | All fit equally well (AIC within 2). 0 → 120 hours cuts risk by 71–80% in every form; `log1p` is the *most cautious* (71%) | ✅ |
+| 6 | Real outcomes at beaches that started drones? | 35 beaches began flying drones in 2018, 2020, 2023 or 2025. Compared actual severe incidents in their drone months with the model's prediction *without* drones | Model without drones: 128. Actual: **56**. That is a 56% cut, against 61% from the model. Close calls + severe: 0.44 actual vs 0.42 modelled | ✅ model close, slightly optimistic |
+| 7 | Drone effect only half as big? | Re-optimised with drones at −0.13 | **10.2 avoided.** Money shifts to lifeguards ($657k); drones still largest ($837k). Our plan keeps 99% | ✅ |
+| 8 | Within-beach coefficients? | Re-optimised with check 2's numbers (flags set to zero) | **11.6 avoided**; drones $1.6M, almost no lifeguards. Our plan keeps 98% | ✅ |
+| 9 | Only the robust levers? | Lifeguards and flags set to no effect | **11.0 avoided** with drones + campaigns only. Our plan still gets 10.3 (94%) | ✅ |
+| 10 | Everything pessimistic at once? | Drones halved, lifeguards at the within-beach value, no flag effect | **8.3 avoided** (39% cut). Our plan keeps 98% | ✅ still large |
+| 11 | Each lever at its 95% interval end? | One at a time, then all four at the weak end | Drones 10.9–13.6; the others move it less than ±1. All weak at once: **8.4** | ✅ |
+| 12 | Budget curve | Re-optimised at $1M and $3M | $1M → 10.6, $2M → 12.5, $3M → 13.2 avoided | ℹ️ strong diminishing returns |
+
+**What this means in plain words**
+- **Drones are the backbone, and the evidence for them is the strongest we have.** The effect is stable, holds within the same beach, improves forecasts and matches what actually happened at beaches that started flying. The staggered start years (2018, 2020, 2023, 2025) mean it isn't just one good year.
+- **Campaigns are equally solid**, but they only help in summer and can only take about $400k.
+- **Lifeguards and flags are uncertain.** Their effect comes from comparing *different* beaches, not from changes at the same beach. For lifeguards that's partly expected, because a beach's patrol hours mostly change with the season, so month and patrols share credit (see 03). Flags hardly ever change at a beach, so there is nothing within-beach to measure. If they did nothing, we'd lose about 2 of the 12.5, and the plan would still be the best use of the money (check 9).
+- **The honest range to quote:** "about 12.5 fewer severe incidents a year, and still about 8 even if drones work half as well as we estimate and lifeguards and flags do nothing."
+
+**Limitations to state (add to slide 17 if there is room)**
+- **About 5.4 of the 12.5 come from 27 beaches that have never flown drones.** The drone effect is estimated at the 35 beaches that have, so applying it to new beaches assumes they respond the same way.
+- **Scale:** 20,183 extra drone hours is +68% on today's fleet (29,566 hours). That needs operators, airspace approvals and maintenance the price list doesn't cover.
+- **Diminishing returns are steep:** the first $1M gets 85% of the benefit. This is partly the `log1p` shape, so the second $1M is the least certain part of the plan.
+- **Still association, not proof:** if drones were sent to beaches where risk was already falling, the effect is overstated. Check 6 is consistent with the model, but it uses the same data the model was fitted on.
+
+## Likely Q&A (Task 2)
+- **Why mostly drones?** Most beaches fly few or no drones, the first hours of cover have a large effect, and a drone costs $9,450 to set up and $45 an hour to fly. Each dollar buys more risk reduction there than anywhere else.
+- **Isn't the drone effect just the log transform?** No. Square-root, straight-line and on/off versions fit as well and give *bigger* effects for 0 → 120 hours (check 5).
+- **Couldn't drones simply be at safer beaches?** Comparing each beach with itself gives the same effect (−0.29 vs −0.26), and beaches that started flying drones saw severe incidents fall about as much as the model predicts (checks 2 and 6).
+- **Why no full-time lifeguards?** A full-time lifeguard costs $80,500 for 1,750 hours ($46/hr), but those hours are spread over the whole year, including summer, when beaches are already patrolled. Casual hours ($58/hr) can go only where risk is high: unpatrolled winter months.
+- **Why not first aid or PA systems?** Neither shows any effect on severe incidents (first aid +0.003, PA +0.03). First aid capacity does show a small effect on close calls + severe (−0.007), so it may help less serious outcomes, but the brief asks us to minimise severe incidents.
+- **Why winter patrols of at least 97 hours?** That's the smallest patrol actually run in the data (5th percentile). Anything smaller couldn't be rostered, and the model would overstate it.
+- **If risk is concentrated, why fund 69 beaches?** Diminishing returns: once a beach has some cover, the next dollar does more at a beach with none. Even so, the top 10 beaches get 53% of the benefit.
+- **What if the budget is cut to $1M?** Fund drones and campaigns first: $1M still avoids about 10.6. The second $1M adds about 1.8.
+- **How sure are you about 12.5?** The 90% range is 11–16 from 5,000 simulated years (weather, estimated effects, chance). Under the most pessimistic assumptions we tested, it is still about 8.
+- **What would change your mind?** If the 12-month review shows no fall in severe incidents and close calls at funded beaches, especially the new drone beaches, cut the drone hours and move money to campaigns and winter patrols.
+
+**On a slide:** for the appendix, one dot-range chart: "avoided per year under each check", with the base 12.5 marked and the pessimistic 8.3 at the left end. Title: "The plan holds under every check: 8–13 fewer severe incidents."
