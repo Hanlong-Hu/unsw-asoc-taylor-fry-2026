@@ -18,7 +18,7 @@ Paths are relative to the project root. Line numbers are as of commit on 2026-10
 | Claim | Source | Check |
 |---|---|---|
 | $2M a year, minimise severe incidents | `context.md:22-23` (Task 2) | Brief |
-| "Mostly drones, plus winter patrols, campaigns and rip flags … about 12.5 a year" | `part2/optimise.Rmd` §5 Results (`:228`); `presentation/optimise_results.md:7-22` | Notebook |
+| "Mostly drones, plus winter patrols, campaigns and rip flags … about 12.5 a year" | `part2/optimise.Rmd` §5 Results (`:257`); `presentation/optimise_results.md:7-22` | Notebook |
 | Date: October 2026 | `timeline_plan.md:3` (main checkout, gitignored): slides due Thu 22 Oct, heats from 29 Oct | Planning note |
 | Team name, members | — (not recorded anywhere in the project) | Placeholder |
 
@@ -29,7 +29,7 @@ Paths are relative to the project root. Line numbers are as of commit on 2026-10
 | (15–33), 90% range | `part1/06_forecast.Rmd:269` (§5 Uncertainty, 5,000 simulated years) | Notebook |
 | ~50% at the top 10 beaches | `part1/06_forecast.Rmd:206` (§4 Where) | Notebook |
 | Winter visit 4–7× riskier than summer | `part1/06_forecast.Rmd:177` (§4 When) | Notebook |
-| ≈ 12.5 (11–16) fewer a year | `part2/optimise.Rmd` §5 (`:228`) and §6 Uncertainty (`:299`) | Notebook |
+| ≈ 12.5 (11–16) fewer a year | `part2/optimise.Rmd` §5 (`:257`) and §6 Uncertainty (`:359`) | Notebook |
 | $1.16M drones, $392k patrols, $330k campaigns, $115k flags | `part2/optimise.Rmd` §5, `cost` vector; `presentation/optimise_results.md:14-22` | Notebook |
 
 ### 3 · `brief` — Goal: fewest severe incidents for $2M a year
@@ -95,8 +95,8 @@ Divider, no figures.
 |---|---|---|
 | Raise risk: swell, rips per km, tourists | Severe model `final$sev` refitted in `part1/06_forecast.Rmd:42` (swell +0.69, rips +0.20, tourist share +4.17) | Notebook object; printed in `presentation/optimise_results.md` run log |
 | Each extra metre of swell roughly doubles severe risk (speaker notes) | `part1/06_forecast.Rmd:61` | Notebook (exp(0.69) = 2.0) |
-| Lower risk: lifeguard hours, drone hours, campaigns, flags | `part2/optimise.Rmd:40` (prints the lever coefficients) | Notebook |
-| First aid and PA show no effect (speaker notes) | `part2/optimise.Rmd:40-45` | Notebook |
+| Lower risk: lifeguard hours, drone hours, campaigns, flags | `part2/optimise.Rmd:53` (prints the lever coefficients) | Notebook |
+| First aid and PA show no effect (speaker notes) | `part2/optimise.Rmd:53-58` | Notebook |
 | Association, not proof | `part1/06_forecast.Rmd:295`; robustness `presentation_notes.md:221-247` | Notebook |
 | Rate-ratio dot chart with 95% ranges (swell ×1.99, drones 0→100 hrs ×0.30, first aid ×1.03 …) | `part2/robustness/chart_data.R` "Slide 11 / A1" (from `final$sev`) | Recomputed |
 
@@ -108,24 +108,24 @@ Divider, no figures.
 ### 13 · `recommend` — Spend most of the $2M on drones, then winter patrols
 | Claim | Source | Check |
 |---|---|---|
-| $1.16M drones (27 new, 20,183 hrs), $392k patrols (22 beaches), $330k campaigns (22 postcodes), $115k flags (23 beaches) | `part2/optimise.Rmd` §5 `results` (`:228`) and `allocation` (`:268`); `part2/optimal_allocation_by_beach.csv`; `presentation/optimise_results.md:14-22` | Notebook |
-| ≈ 12.5 avoided, 21 → 9, down 58% | `part2/optimise.Rmd` §5 (`:228`) | Notebook (12.48; 21.43 → 8.95) |
-| (11–16) a year; 4–16 severe in 9 years of 10 | `part2/optimise.Rmd` §6 Uncertainty (`:299`) | Notebook |
+| $1.16M drones (27 new, 20,183 hrs), $392k patrols (22 beaches), $330k campaigns (22 postcodes), $115k flags (23 beaches) | `part2/optimise.Rmd` §5 `results` (`:257`) and `allocation` (`:325`); `part2/optimal_allocation_by_beach.csv`; `presentation/optimise_results.md:14-22` | Notebook |
+| ≈ 12.5 avoided, 21 → 9, down 58% | `part2/optimise.Rmd` §5 (`:257`) | Notebook (12.48; 21.43 → 8.95) |
+| (11–16) a year; 4–16 severe in 9 years of 10 | `part2/optimise.Rmd` §6 Uncertainty (`:359`) | Notebook |
 | Beaches gaining most; "+ 61 more" (69 funded) | `part2/optimal_allocation_by_beach.csv` (sorted by `avoided`) | Notebook |
 | Drones ≈ 8 of the 12.5 (speaker notes) | `presentation/optimise_results.md:16-21` ("Avoided on its own") | Notebook |
 
 ### 14 · `method` — We put each dollar where it avoids the most
 | Claim | Source | Check |
 |---|---|---|
-| Four steps: baseline, price, value, optimise | `part2/optimise.Rmd` §1–4 (`:20`, `:57`, `:84`, `:152`) | Notebook |
-| Spreads across 69 beaches | `part2/optimise.Rmd` `allocation` chunk (`:268`, "Beaches funded") | Notebook |
-| New patrols ≥ 97 hours a month | `part2/optimise.Rmd:99` (`MIN_LG`, 5th percentile of patrolled months) | Notebook |
+| Four steps: baseline, price, value, optimise | `part2/optimise.Rmd` §1–4 (`:27`, `:71`, `:102`, `:173`) | Notebook |
+| Spreads across 69 beaches | `part2/optimise.Rmd` `allocation` chunk (`:325`, "Beaches funded") | Notebook |
+| New patrols ≥ 97 hours a month | `part2/optimise.Rmd:120` (`MIN_LG`, 5th percentile of patrolled months) | Notebook |
 
 ### 15 · `alternatives` — Our mix avoids more severe incidents per dollar
 | Claim | Source | Check |
 |---|---|---|
-| Our plan 12.5, ~$160k per avoided | `part2/optimise.Rmd` §5 (`:228`) | Notebook |
-| Education only 2.9, ~$209k ($615k spend) | `part2/optimise.Rmd` §7 Alternatives (`:329`) | Notebook |
+| Our plan 12.5, ~$160k per avoided | `part2/optimise.Rmd` §5 (`:257`) | Notebook |
+| Education only 2.9, ~$209k ($615k spend) | `part2/optimise.Rmd` §7 Alternatives (`:392`) | Notebook |
 | Spread evenly 3.0, ~$656k | `part2/optimise.Rmd` §7 | Notebook |
 | Summer-only patrols 0.3, ~$5.6M | `part2/optimise.Rmd` §7 | Notebook |
 | Bars: avoided per $1M (6.2, 4.8, 1.5, 0.2) | avoided ÷ spend from `part2/optimise.Rmd` §7 | Derived |
@@ -135,8 +135,8 @@ Divider, no figures.
 | Claim | Source | Check |
 |---|---|---|
 | 27 drones, 23 flag beaches, 22 campaign postcodes, 22 winter-patrol beaches | `part2/optimal_allocation_by_beach.csv`, `part2/optimal_allocation_by_postcode.csv` | Notebook |
-| Campaigns work Nov–Feb | `part2/optimise.Rmd:73` (`SUMMER`) | Model assumption |
-| Patrols start in May; half the gain in May–Aug | `part2/optimise.Rmd:285` (`by_month`) | Notebook |
+| Campaigns work Nov–Feb | `part2/optimise.Rmd:91` (`SUMMER`) | Model assumption |
+| Patrols start in May; half the gain in May–Aug | `part2/optimise.Rmd:344` (`by_month`) | Notebook |
 | Quarter-by-quarter actions | — | Draft |
 | "The price list gives no lead times" | `part1/pricing.csv` (no lead-time column) | Data |
 
@@ -147,7 +147,7 @@ Divider, no figures.
 |---|---|---|
 | Visitors grow 1.9% a year | `part1/06_forecast.Rmd:103`, `:286` | Notebook |
 | Weather like the past decade; safety at FY2026 levels | `part1/06_forecast.Rmd:287-288` | Notebook |
-| Each initiative works as the Task 1 model says | `part2/optimise.Rmd` §1 (`:20`) | Notebook |
+| Each initiative works as the Task 1 model says | `part2/optimise.Rmd` §1 (`:27`) | Notebook |
 | Association, not causation; severe rare; FY2020–21 dip | `part1/06_forecast.Rmd:295-297` | Notebook |
 | 27 new drone beaches have never flown one (≈ 5.4 of 12.5) | `part2/robustness/robust_c.R` C4; `presentation_notes.md:248-252` | Notebook |
 | +68% drone hours (20,183 vs 29,566 today) | `part2/robustness/robust_c.R` C4 | Notebook |
@@ -182,14 +182,14 @@ Repeats slide 2: sources as for `exec`. "Approve the $2M plan … 12-month revie
 ### A4 · `a4` — Optimisation formulation
 | Claim | Source | Check |
 |---|---|---|
-| Variables, objective, constraints, ≥ 97-hr patrols | `part2/optimise.Rmd` §3–4 (`:84`, `:152`) | Notebook |
-| HiGHS, within 0.6% of optimal | `part2/optimise.Rmd` `solve` chunk (`:201`) | Notebook |
+| Variables, objective, constraints, ≥ 97-hr patrols | `part2/optimise.Rmd` §3–4 (`:102`, `:173`) | Notebook |
+| HiGHS, within 0.6% of optimal | `part2/optimise.Rmd` `solve` chunk (`:226`) | Notebook |
 | Budget curve $0–3M (8.5, 10.6, 11.8, 12.5, 13.0, 13.2) | `part2/robustness/scenario.R` runs `budget_0.5m` … `budget_3m` (`BUDGET` env var) | Notebook |
 
 ### A5 · `a5` — Pricing inputs
 | Claim | Source | Check |
 |---|---|---|
-| Initiative price list | `part1/pricing.csv`; used in `part2/optimise.Rmd` §2 (`:57`) | Data |
+| Initiative price list | `part1/pricing.csv`; used in `part2/optimise.Rmd` §2 (`:71`) | Data |
 | Conversion to hours, costs charged in full (`AMORT = 1`), 3-year drone life | `part2/optimise.Rmd` §2 (`FTE_HRS`, `DRONE_CAP`, `AMORT`); `part1/pricing.csv` notes column | Notebook |
 
 ### A6 · `a6` — The plan holds under every check: 8–13 fewer severe incidents

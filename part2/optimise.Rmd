@@ -3,6 +3,13 @@ title: "optimise: budget allocation MILP on the Part 1 severe model"
 output: html_document
 ---
 
+Plans the extra $2M against the severe-incident model chosen in Part 1 (`M5_traits`, step 05). This is the
+single Task 2 optimiser: it merges the earlier `optimise_m5traits.Rmd` into this file. `optimise_notes.md`
+explains what changed from the first version (a separate Poisson GLM) and why.
+
+Run `part1/06_forecast.Rmd` first: this file reads its hand-off, `part1/forecast_fy2027.rds`. Packages:
+`install.packages(c("ompr", "ompr.roi", "ROI", "highs"))`.
+
 ```{r setup, message=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 root <- rprojroot::find_root(rprojroot::has_dir("part1"))   # project root, wherever this is run from
@@ -19,6 +26,10 @@ select <- dplyr::select   # MASS masks select()
 
 ## 1. Model and baseline (from Part 1)
 
+> **In plain terms:** we start from Part 1's forecast of next year (FY2027) if nothing changes: about 21
+> severe incidents. The model says how much each safety measure lowers the risk. Those effects are what the
+> money gets spent against.
+
 The severe model is the Part 1 negative binomial (`06_forecast.Rmd`): visitors as an offset, month, weather, beach traits and the safety levers, with lifeguard and drone hours entering as `log1p(hours)` (diminishing returns). The baseline is its FY2027 forecast (Sep 2026 to Aug 2027, safety at FY2026 levels, weather replayed over the 10 past years).
 
 Safety terms add to the linear predictor, so changing them multiplies every weather replay by the same factor: `mu_new = mu0 * exp(delta)` is exact, with `mu0` the replay-averaged forecast.
@@ -26,10 +37,11 @@ Safety terms add to the linear predictor, so changing them multiplies every weat
 ```{r data-model}
 fy27      <- readRDS("part1/forecast_fy2027.rds")
 glm_fit   <- fy27$final$sev
+m_cc      <- fy27$final$cc     # same predictors; used only to report the knock-on effect on close calls
 panel_f   <- readRDS("part1/panel_f.rds")
 
 win <- fy27$newdata %>%
-  left_join(fy27$forecast %>% select(beach_nm, mon, mu0 = mu_sev), by = c("beach_nm", "mon")) %>%
+  left_join(fy27$forecast %>% select(beach_nm, mon, mu0 = mu_sev, mu0_cc = mu_cc), by = c("beach_nm", "mon")) %>%
   arrange(beach_nm, month_date)
 stopifnot(nrow(win) == 960, !anyNA(win$mu0))
 
@@ -37,7 +49,9 @@ b    <- coef(glm_fit)
 b_lg <- b[["log_lg"]];       b_dr <- b[["log_drone"]]
 b_c  <- b[["campaign_idx"]]; b_fa <- b[["first_aid_cap"]]
 b_pa <- b[["pa_system"]];    b_fl <- b[["flags"]]
-print(round(summary(glm_fit)$coefficients[c("log_lg", "log_drone", "campaign_idx", "first_aid_cap", "pa_system", "flags"), ], 4))
+lev_names <- c("log_lg", "log_drone", "campaign_idx", "first_aid_cap", "pa_system", "flags")
+knitr::kable(cbind(coef = b[lev_names], RR = exp(b[lev_names]), exp(confint.default(glm_fit)[lev_names, ])), digits = 3,
+             caption = "Safety levers in the severe model (RR < 1 = protective)")
 
 # A lever with a coefficient >= 0 does nothing for severe incidents, so it is left out.
 levers <- c(log_lg = b_lg, log_drone = b_dr, campaign_idx = b_c, first_aid_cap = b_fa, pa_system = b_pa, flags = b_fl)
@@ -55,6 +69,10 @@ cat("Baseline expected severe incidents (FY2027 forecast):", round(baseline_tota
 ```
 
 ## 2. Prices and settings
+
+> **In plain terms:** what each item costs, plus the practical rules we impose: no more lifeguard hours at a
+> beach than the busiest beach-month has ever had, one drone flies at most 120 hours a month, and a new
+> patrol at a beach-month with none is a real roster (section 3), not a single hour.
 
 ```{r prices}
 prices <- read.csv("part1/pricing.csv")
@@ -82,6 +100,9 @@ stopifnot(!anyNA(c(c_lg, c_fte, c_dr_hr, c_dr_buy, c_camp, c_fl)))
 ```
 
 ## 3. Precompute what each purchase can change
+
+> **In plain terms:** for every beach and month, work out the most each measure could add (how many more
+> hours fit, whether flags are already up, and so on) and how much risk that would remove.
 
 Lifeguard and drone hours enter as `log1p`, so the decision variables are the **log-gains** `tl = log1p(lg0 + x) - log1p(lg0)` (and `td` for drones). The incident effect is then linear in them (`b_lg * tl`). The hours they need, `(1 + lg0) * (exp(tl) - 1)`, are convex in `tl`, so the hours paid for must lie above a set of chord lines through a grid of hours. Chords sit above the curve, so the cost is never understated.
 
@@ -150,6 +171,10 @@ have_act  <- as.numeric(tapply(isact, win$b, max) > 0)
 ```
 
 ## 4. The MILP
+
+> **In plain terms:** a solver searches every affordable mix of purchases for the one with the fewest
+> expected severe incidents within the $2M. The model's curves are replaced by straight-line pieces so the
+> solver can handle them; section 5 re-checks the answer with the exact curves.
 
 ```{r model}
 model <- MIPModel() %>%
@@ -223,6 +248,10 @@ cat("Solver status:", res$status, "|", hs$status_message, "| MIP gap:", signif(h
 
 ## 5. Results (recomputed exactly from the Part 1 model)
 
+> **In plain terms:** take the solver's shopping list, put it back into the real model (no straight-line
+> shortcuts), and count how many severe incidents it avoids next year, what it costs, and where the money
+> goes.
+
 The effect is recomputed from the hours actually bought, not from the solver's log-gains, so it is exact and matches the cost.
 
 ```{r results}
@@ -260,16 +289,46 @@ cat(sprintf("Spent %s of %s\n", format(round(sum(cost)), big.mark = ","), format
 cat(sprintf("Expected severe incidents: %.1f -> %.1f  (%.1f avoided, %.1f%%)\n",
             baseline_total, sum(win$mu_new), avoided, 100 * avoided / baseline_total))
 cat(sprintf("Cost per severe incident avoided: $%s\n", format(round(sum(cost) / avoided, -3), big.mark = ",")))
-cat(sprintf("MILP objective (tangent approximation, a lower bound on incidents): %.1f\n",
+# Close calls are not optimised for; the same purchases lower them too (Part 1 close-call model)
+win$mu_new_cc <- win$mu0_cc * exp(plan_delta(lg_add, dh_v, flag_v, camp_v, coef(m_cc)))
+cat(sprintf("Expected close calls (knock-on): %.1f -> %.1f\n", sum(win$mu0_cc), sum(win$mu_new_cc)))
+cat(sprintf("MILP objective (approximation, a guide only): %.1f\n",
             sum(get_solution(res, z[r])$value) + sum(win$mu0[-act])))
 print(round(cost))
 ```
 
+### Which purchases do the work
+
+> **In plain terms:** the saving from each type of purchase on its own, with everything else switched off.
+> The lines need not add up to the total, because the effects multiply.
+
+```{r attribution}
+none_b <- rep(0, B); none_p <- rep(0, P)
+attr_tab <- tibble(
+  lever = c("Lifeguards", "Drones", "Campaigns", "Flags/signage"),
+  spend = c(sum(cost[c("casual_lifeguards", "full_time_lifeguards")]),
+            sum(cost[c("drone_hours", "drone_hardware_training")]), cost[["campaigns"]], cost[["flags"]]),
+  severe_avoided_alone = c(
+    baseline_total - sum(win$mu0 * exp(plan_delta(lg_add, 0, none_b, none_p))),
+    baseline_total - sum(win$mu0 * exp(plan_delta(0, dh_v, none_b, none_p))),
+    baseline_total - sum(win$mu0 * exp(plan_delta(0, 0, none_b, camp_v))),
+    baseline_total - sum(win$mu0 * exp(plan_delta(0, 0, flag_v, none_p))))
+) %>% mutate(cost_per_incident = ifelse(severe_avoided_alone > 0, spend / severe_avoided_alone, NA))
+knitr::kable(attr_tab, digits = c(0, 0, 2, 0))
+```
+
+### Allocation
+
+> **In plain terms:** the shopping list by beach and by postcode, with each beach's expected severe incidents
+> before and after, and the plan month by month.
+
 ```{r allocation}
+mon_lab <- function(rows) paste(month.abb[win$cal[rows]], collapse = " ")
 by_beach <- tibble(
   beach = beach_ids,
   postcode = win %>% group_by(b) %>% summarise(p = first(postcode)) %>% pull(p),
   casual_lg_hrs = as.numeric(tapply(cas_v, bi, sum)),
+  casual_months = sapply(seq_len(B), function(i) mon_lab(which(bi == i & cas_v > 0.5))),
   fte = fte_v, drone_bought = ydr_v, drone_hrs = as.numeric(tapply(dh_v, bi, sum)),
   flags = flag_v,
   winter_lg_hrs = as.numeric(tapply(lg_add * (win$cal %in% 5:8), bi, sum)),
@@ -283,7 +342,8 @@ by_beach <- tibble(
 by_postcode <- tibble(postcode = pc_ids, campaign = camp_v) %>% filter(campaign > 0)
 
 by_month <- win %>% mutate(lg_add = lg_add, dh = dh_v) %>% group_by(cal) %>%
-  summarise(extra_lg_hrs = sum(lg_add), extra_drone_hrs = sum(dh), avoided = sum(mu0 - mu_new))
+  summarise(before = sum(mu0), after = sum(mu_new), extra_lg_hrs = sum(lg_add), extra_drone_hrs = sum(dh),
+            avoided = sum(mu0 - mu_new))
 
 knitr::kable(by_beach, digits = 2)
 by_postcode
@@ -297,6 +357,9 @@ write.csv(by_postcode, "part2/optimal_allocation_by_postcode.csv", row.names = F
 ```
 
 ## 6. Uncertainty
+
+> **In plain terms:** the effect sizes, the weather and the year's luck are all uncertain. We simulate 5,000
+> possible years with and without the plan, which gives a range instead of a single number.
 
 Same three sources as Part 1 section 5: weather (one past year for the whole coast), parameters (`mvrnorm(coef, vcov)`) and chance (negative binomial draws). The allocation is held fixed; each draw scores it with that draw's coefficients.
 
@@ -349,6 +412,9 @@ knitr::kable(alts, digits = c(0, 0, 2, 0))
 ```
 
 ## 8. Notes
+
+See `optimise_notes.md` for the full write-up (what was wrong with the first version, the differences in
+approach, sensitivity checks and open questions) and `presentation_notes.md` §07–08 for the robustness checks.
 
 -   First aid capacity and PA systems have coefficients at or above zero for severe incidents in the Part 1 model, so the optimiser does not buy them. Equipment rating has no price, so it is not a lever.
 -   Effects are associations (Part 1 section 7). Lifeguards and drones were probably placed where risk is high, so if anything their effect is understated.
