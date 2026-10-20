@@ -55,7 +55,7 @@ Divider, no figures.
 | Claim | Source | Check |
 |---|---|---|
 | June visit ~5–6× riskier than January | `presentation_notes.md:60` (02 EDA) | Recomputed: 0.299 vs 0.054 severe per 100k visits = **5.5×** |
-| ~80% of beach-months patrolled Sep–Apr vs ~12% May–Aug | `part1/04_baseline_models.Rmd:121`; `analysis/NOTES.md:13` | Recomputed: 0.80 vs 0.12 |
+| ~80% of beach-months patrolled Sep–Apr vs ~12% May–Aug | `part1/04_baseline_models.Rmd:121` | Recomputed: 0.80 vs 0.12 |
 | Chart: visitors a year and severe per 100k visits by month (two panels, one axis each) | `part2/robustness/chart_data.R` "Slide 6"; `panel_f.rds`, 10 years | Recomputed (Jan 4.8M visitors; Jun 0.30 vs Jan 0.05 per 100k) |
 
 ### 7 · `model` — Six inputs, one simple model per severity
