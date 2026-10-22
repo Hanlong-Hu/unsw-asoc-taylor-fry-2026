@@ -1,4 +1,4 @@
-# Taylor Fry Case Competition 2026: model files
+# DSA Consultants Model: Taylor Fry Case Competition 2026
 
 These are the R files behind our slide pack. Task 1 forecasts next year's beach safety incidents (`part1/`). Task 2 allocates the extra $2M a year to minimise severe incidents (`part2/`).
 
